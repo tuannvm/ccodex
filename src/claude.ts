@@ -1,12 +1,22 @@
 import spawnCmd from 'cross-spawn';
 import { join } from 'path';
-import { hasCommand, ensureDir, getUid } from './utils.js';
+import { homedir } from 'os';
+import { hasCommand, ensureDir, getUid, fileExists } from './utils.js';
 import { startProxy, checkAuthConfigured, launchLogin, waitForAuth } from './proxy.js';
+
+// Track locally installed Claude CLI path for this process
+let installedClaudePath: string | null = null;
 
 /**
  * Detect Claude Code installation
+ * Prefers locally installed binary from this process if available
  */
 export async function detectClaudeCommand(): Promise<{ cmd: string | null; path: string | null }> {
+  // Prefer locally installed binary from this process
+  if (installedClaudePath && fileExists(installedClaudePath)) {
+    return { cmd: installedClaudePath, path: installedClaudePath };
+  }
+
   if (await hasCommand('claude')) {
     try {
       const { execCommand } = await import('./utils.js');
@@ -20,7 +30,25 @@ export async function detectClaudeCommand(): Promise<{ cmd: string | null; path:
 }
 
 /**
- * Install Claude Code via npm
+ * Helper to run npm install and capture stderr
+ */
+async function runNpmInstall(args: string[]): Promise<{ ok: boolean; stderr: string }> {
+  const spawn = (await import('cross-spawn')).default;
+  return new Promise((resolve, reject) => {
+    const child = spawn('npm', args, { stdio: ['ignore', 'inherit', 'pipe'] });
+    let stderr = '';
+    child.stderr?.on('data', (d: Buffer) => {
+      const s = d.toString();
+      stderr += s;
+      process.stderr.write(s);
+    });
+    child.on('error', reject);
+    child.on('close', code => resolve({ ok: code === 0, stderr }));
+  });
+}
+
+/**
+ * Install Claude Code via npm with fallback to local prefix
  */
 export async function installClaudeCode(): Promise<void> {
   // Check if npm is available
@@ -30,30 +58,54 @@ export async function installClaudeCode(): Promise<void> {
 
   console.log('Installing Claude Code CLI via npm...');
 
-  const spawnCmd = (await import('cross-spawn')).default;
-  return new Promise<void>((resolve, reject) => {
-    const child = spawnCmd('npm', ['install', '-g', '@anthropic-ai/claude-code'], {
-      stdio: 'inherit',
-    });
+  // Try global install first
+  const global = await runNpmInstall(['install', '-g', '@anthropic-ai/claude-code']);
+  if (global.ok) {
+    console.log('Claude Code CLI installed successfully via npm global');
+    return;
+  }
 
-    child.on('close', (code: number | null) => {
-      if (code === 0) {
-        console.log('Claude Code CLI installed successfully');
-        resolve();
-      } else {
-        reject(new Error('Failed to install Claude Code CLI'));
-      }
-    });
+  // Check if it was a permission error
+  const permissionDenied = /EACCES|permission denied/i.test(global.stderr);
+  if (!permissionDenied) {
+    throw new Error('Failed to install Claude Code CLI');
+  }
 
-    child.on('error', (error: Error) => reject(error));
-  });
+  // Fallback to local install
+  const localPrefix = join(homedir(), '.local', 'ccodex', 'npm');
+  console.log(`Global install denied. Falling back to local prefix: ${localPrefix}`);
+
+  const local = await runNpmInstall(['install', '--prefix', localPrefix, '@anthropic-ai/claude-code']);
+  if (!local.ok) {
+    throw new Error('Failed to install Claude Code CLI (global + local fallback both failed)');
+  }
+
+  // Store the installed path for this process
+  installedClaudePath = join(localPrefix, 'node_modules', '.bin', 'claude');
+  console.log(`Claude Code CLI installed locally: ${installedClaudePath}`);
 }
 
 /**
  * Run Claude Code CLI with proxy environment
  */
 export async function runClaude(args: string[]): Promise<void> {
-  if (!(await hasCommand('claude'))) {
+  // Check if we have a locally installed Claude path from this process
+  let claudeExe: string | null = null;
+
+  if (installedClaudePath && fileExists(installedClaudePath)) {
+    claudeExe = installedClaudePath;
+  } else if (await hasCommand('claude')) {
+    // Find claude in PATH
+    try {
+      const { execCommand } = await import('./utils.js');
+      claudeExe = await execCommand('which', ['claude']);
+    } catch {
+      // which failed, try using 'claude' directly
+      claudeExe = 'claude';
+    }
+  }
+
+  if (!claudeExe) {
     throw new Error('claude CLI not found in PATH\nInstall Claude Code CLI first, then rerun: npx -y @tuannvm/ccodex');
   }
 
@@ -124,7 +176,7 @@ export async function runClaude(args: string[]): Promise<void> {
   env.CLAUDE_CONFIG_DIR = join(userHome, '.claude-openai');
 
   // Spawn Claude with modified environment
-  const child = spawnCmd('claude', args, {
+  const child = spawnCmd(claudeExe, args, {
     stdio: 'inherit',
     env,
   });

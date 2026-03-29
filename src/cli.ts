@@ -8,6 +8,53 @@ import { printStatus, readyCheck } from './status.js';
 import { runClaude, detectClaudeCommand, installClaudeCode } from './claude.js';
 
 /**
+ * Preflight check - validate platform and capabilities before main operations
+ * Only runs for non-status commands to allow read-only diagnostics anywhere
+ */
+function preflightOrThrow(): void {
+  const platform = process.platform;
+  const arch = process.arch;
+
+  // Check Node.js version
+  const nodeMajorVersion = Number(process.versions.node.split('.')[0]);
+  if (nodeMajorVersion < 18) {
+    throw new Error(
+      `Node.js ${process.versions.node} detected.\n` +
+      `Please use Node.js >= 18. You have ${process.versions.node}.`
+    );
+  }
+
+  // Check OS support
+  const supportedPlatforms = ['darwin', 'linux', 'win32'];
+  if (!supportedPlatforms.includes(platform)) {
+    throw new Error(
+      `Unsupported OS: ${platform}\n` +
+      `Supported platforms: ${supportedPlatforms.join(', ')}`
+    );
+  }
+
+  // Check architecture for proxy auto-install (Unix/Linux only)
+  if (platform === 'darwin' || platform === 'linux') {
+    const supportedArches = ['arm64', 'x64'];
+    if (!supportedArches.includes(arch)) {
+      throw new Error(
+        `Unsupported architecture for CLIProxyAPI auto-install: ${arch}\n` +
+        `Supported architectures: ${supportedArches.join(', ')}\n` +
+        `CLIProxyAPI must be installed manually for your architecture.`
+      );
+    }
+  }
+
+  // Windows warning
+  if (platform === 'win32') {
+    console.log(chalk.yellow(
+      'Windows detected: CLIProxyAPI requires manual installation.\n' +
+      'Install from: https://github.com/router-for-me/CLIProxyAPI/releases'
+    ));
+  }
+}
+
+/**
  * Ensure everything is set up (idempotent)
  * Implements steps 1-5 of the ccodex workflow:
  * 1. Check/install Claude Code CLI
@@ -72,6 +119,11 @@ async function main(): Promise<void> {
     .parse(process.argv);
 
   const options = program.opts();
+
+  // Preflight check for all operations except --status (read-only diagnostics)
+  if (!options.status) {
+    preflightOrThrow();
+  }
 
   // Handle --login
   if (options.login) {

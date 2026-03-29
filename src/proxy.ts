@@ -3,10 +3,19 @@ import { hasCommand, execCommand, httpGet, sleep, ensureDir, fileExists, safeJso
 import { CONFIG, getProxyUrl, getAuthDir, getLogFilePath } from './config.js';
 import type { ProxyCommand, AuthStatus } from './types.js';
 
+// Track installed proxy binary path for this process
+let installedProxyPath: string | null = null;
+
 /**
  * Detect CLIProxyAPI command
+ * Prefers locally installed binary from this process if available
  */
 export async function detectProxyCommand(): Promise<ProxyCommand> {
+  // Prefer locally installed binary from this process
+  if (installedProxyPath && fileExists(installedProxyPath)) {
+    return { cmd: 'cliproxyapi', path: installedProxyPath };
+  }
+
   if (await hasCommand('cliproxyapi')) {
     try {
       const path = await execCommand('which', ['cliproxyapi']);
@@ -62,7 +71,9 @@ export async function checkAuthConfigured(): Promise<AuthStatus> {
   const cmdResult = await detectProxyCommand();
   if (cmdResult.cmd) {
     try {
-      const output = await execCommand(cmdResult.cmd, ['status']);
+      // Use absolute path if available, otherwise command name
+      const proxyExe = cmdResult.path || cmdResult.cmd;
+      const output = await execCommand(proxyExe, ['status']);
       // Match "N auth entries" or "N auth files" where N > 0
       const match = output.match(/(\d+)\s+(auth entries|auth files)/);
       if (match) {
@@ -253,6 +264,8 @@ export async function installProxyApi(): Promise<void> {
     // Move temp file to final location (atomic on most filesystems)
     try {
       await fs.rename(tempPath, binaryPath);
+      // Store the installed path for this process
+      installedProxyPath = binaryPath;
     } catch (renameError) {
       // Rollback: restore backup if we had one
       if (didBackup && backupPath) {
@@ -317,8 +330,9 @@ export async function startProxy(): Promise<void> {
   }
 
   const cmdResult = await detectProxyCommand();
-  const proxyCmd = cmdResult.cmd;
-  if (!proxyCmd) {
+  // Use absolute path if available, otherwise command name
+  const proxyExe = cmdResult.path || cmdResult.cmd;
+  if (!proxyExe) {
     throw new Error('CLIProxyAPI not found. Run: npx -y @tuannvm/ccodex');
   }
 
@@ -345,7 +359,7 @@ export async function startProxy(): Promise<void> {
       }
     }
 
-    const child = spawn(proxyCmd, [], {
+    const child = spawn(proxyExe, [], {
       detached: true,
       stdio: ['ignore', out.fd, out.fd],
     });
@@ -382,8 +396,9 @@ export async function startProxy(): Promise<void> {
  */
 export async function launchLogin(): Promise<void> {
   const cmdResult = await detectProxyCommand();
-  const proxyCmd = cmdResult.cmd;
-  if (!proxyCmd) {
+  // Use absolute path if available, otherwise command name
+  const proxyExe = cmdResult.path || cmdResult.cmd;
+  if (!proxyExe) {
     throw new Error('CLIProxyAPI not found. Run: npx -y @tuannvm/ccodex');
   }
 
@@ -391,7 +406,7 @@ export async function launchLogin(): Promise<void> {
 
   const spawnCmd = (await import('cross-spawn')).default;
   return new Promise<void>((resolve, reject) => {
-    const child = spawnCmd(proxyCmd, ['-codex-login'], {
+    const child = spawnCmd(proxyExe, ['-codex-login'], {
       stdio: 'inherit',
     });
 
