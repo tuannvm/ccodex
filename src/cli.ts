@@ -3,7 +3,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { detectProxyCommand, installProxyApi, startProxy, launchLogin, waitForAuth, checkAuthConfigured } from './proxy.js';
-import { configureShellIntegration } from './aliases.js';
+import { configureShellIntegration, isShellIntegrationConfigured } from './aliases.js';
 import { printStatus, readyCheck } from './status.js';
 import { runClaude, detectClaudeCommand, installClaudeCode } from './claude.js';
 
@@ -131,7 +131,12 @@ async function ensureSetup(): Promise<void> {
   }
 
   // 3. Configure shell integration (adds aliases directly to rc files)
-  await configureShellIntegration();
+  // Only run if not already configured for true idempotency
+  const shellConfigured = await isShellIntegrationConfigured();
+  if (!shellConfigured) {
+    await configureShellIntegration();
+    needsSetup = true;
+  }
 
   // 5. Start proxy
   await startProxy();
@@ -158,7 +163,7 @@ async function main(): Promise<void> {
   program
     .name('ccodex')
     .description('TypeScript reimplementation of ccodex - run Claude Code with OpenAI GPT models')
-    .version('0.1.4')
+    .version('0.1.5')
     .option('--login', 'Run ChatGPT/Codex OAuth login')
     .option('--status', 'Show setup status')
     .option('--diagnose', 'Show proxy and auth diagnostics')
@@ -188,7 +193,11 @@ async function main(): Promise<void> {
       await installProxyApi();
     }
 
-    await configureShellIntegration();
+    // Only configure shell integration if not already configured
+    const shellConfigured = await isShellIntegrationConfigured();
+    if (!shellConfigured) {
+      await configureShellIntegration();
+    }
     await startProxy();
 
     // Check current auth status

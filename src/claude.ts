@@ -8,15 +8,36 @@ import { startProxy, checkAuthConfigured, launchLogin, waitForAuth } from './pro
 let installedClaudePath: string | null = null;
 
 /**
+ * Get the deterministic persistent path for local Claude CLI installation
+ * This path is used across process invocations to persistently discover
+ * locally-installed Claude CLI when global install fails
+ */
+function getPersistentLocalClaudePath(): string {
+  return join(homedir(), '.local', 'ccodex', 'npm', 'node_modules', '.bin', 'claude');
+}
+
+/**
  * Detect Claude Code installation
- * Prefers locally installed binary from this process if available
+ * Checks multiple sources in priority order:
+ * 1. Process-local path (fast path for current process)
+ * 2. Persistent local fallback path (for previously-installed local CLI)
+ * 3. System PATH (for globally-installed CLI)
  */
 export async function detectClaudeCommand(): Promise<{ cmd: string | null; path: string | null }> {
-  // Prefer locally installed binary from this process
+  // 1. Prefer locally installed binary from this process (fast path)
   if (installedClaudePath && fileExists(installedClaudePath)) {
     return { cmd: installedClaudePath, path: installedClaudePath };
   }
 
+  // 2. Check persistent local fallback path (for previously-installed CLI)
+  const persistentLocal = getPersistentLocalClaudePath();
+  if (fileExists(persistentLocal)) {
+    // Update process-local cache for faster subsequent checks
+    installedClaudePath = persistentLocal;
+    return { cmd: persistentLocal, path: persistentLocal };
+  }
+
+  // 3. Check system PATH for global installation
   if (await hasCommand('claude')) {
     try {
       const { execCommand } = await import('./utils.js');
@@ -80,8 +101,8 @@ export async function installClaudeCode(): Promise<void> {
     throw new Error('Failed to install Claude Code CLI (global + local fallback both failed)');
   }
 
-  // Store the installed path for this process
-  installedClaudePath = join(localPrefix, 'node_modules', '.bin', 'claude');
+  // Store the installed path using the persistent path function
+  installedClaudePath = getPersistentLocalClaudePath();
   console.log(`Claude Code CLI installed locally: ${installedClaudePath}`);
 }
 
@@ -89,25 +110,14 @@ export async function installClaudeCode(): Promise<void> {
  * Run Claude Code CLI with proxy environment
  */
 export async function runClaude(args: string[]): Promise<void> {
-  // Check if we have a locally installed Claude path from this process
-  let claudeExe: string | null = null;
-
-  if (installedClaudePath && fileExists(installedClaudePath)) {
-    claudeExe = installedClaudePath;
-  } else if (await hasCommand('claude')) {
-    // Find claude in PATH
-    try {
-      const { execCommand } = await import('./utils.js');
-      claudeExe = await execCommand('which', ['claude']);
-    } catch {
-      // which failed, try using 'claude' directly
-      claudeExe = 'claude';
-    }
-  }
-
-  if (!claudeExe) {
+  // Detect Claude CLI using comprehensive detection (process-local, persistent local, system PATH)
+  const claudeCmd = await detectClaudeCommand();
+  if (!claudeCmd.cmd) {
     throw new Error('claude CLI not found in PATH\nInstall Claude Code CLI first, then rerun: npx -y @tuannvm/ccodex');
   }
+
+  // Use detected command (absolute path or command name)
+  const claudeExe = claudeCmd.cmd;
 
   // Ensure proxy is running
   await startProxy();
@@ -136,16 +146,27 @@ export async function runClaude(args: string[]): Promise<void> {
   const userHome = homedir();
 
   // Environment for Claude with proxy
-  // Start from process.env but explicitly exclude Anthropic keys
-  const env: Record<string, string | undefined> = {
-    ...process.env,
-  };
+  // Explicitly exclude ALL Anthropic/OpenAI variables before setting proxy config
+  // This ensures no API key fallback - authentication must happen through ChatGPT OAuth
+  const varsToUnset = [
+    'ANTHROPIC_API_KEY',
+    'CLAUDE_API_KEY',
+    'OPENAI_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_MODEL',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+    'CLAUDE_CODE_SUBAGENT_MODEL',
+  ];
 
-  // Explicitly unset ALL API keys to force use of proxy auth only
-  // NO API key fallback - authentication must happen through ChatGPT OAuth
-  delete env.ANTHROPIC_API_KEY;
-  delete env.CLAUDE_API_KEY;
-  delete env.OPENAI_API_KEY;  // Ensure no OpenAI API key fallback
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!varsToUnset.includes(key) && value !== undefined) {
+      env[key] = value;
+    }
+  }
 
   // Set proxy config - dummy token is replaced by CLIProxyAPI's OAuth credentials
   // The proxy handles ChatGPT authentication, this is just a format placeholder

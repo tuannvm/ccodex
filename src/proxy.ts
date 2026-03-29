@@ -1,4 +1,6 @@
 import { join } from 'path';
+import { createHash } from 'crypto';
+import chalk from 'chalk';
 import { hasCommand, execCommand, httpGet, sleep, ensureDir, fileExists, safeJsonParse, debugLog } from './utils.js';
 import { CONFIG, getProxyUrl, getAuthDir, getLogFilePath } from './config.js';
 import type { ProxyCommand, AuthStatus } from './types.js';
@@ -110,6 +112,71 @@ export async function checkAuthConfigured(): Promise<AuthStatus> {
 }
 
 /**
+ * Compute SHA-256 hash of binary data
+ */
+function sha256Hex(data: Uint8Array): string {
+  return createHash('sha256').update(data).digest('hex');
+}
+
+/**
+ * Parse checksum file to find expected hash for a specific file
+ * Supports common checksum formats:
+ * - SHA256SUMS: "a1b2c3...  filename" or "a1b2c3... *filename"
+ * - checksums.txt: "a1b2c3... filename"
+ */
+function parseExpectedSha256(content: string, fileName: string): string | null {
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Match: hash followed by whitespace and filename (with optional * prefix)
+    const match = trimmed.match(/^([a-fA-F0-9]{64})\s+\*?(.+)$/);
+    if (match) {
+      const [, hash, name] = match;
+      if (name.trim() === fileName) {
+        return hash.toLowerCase();
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Fetch latest release info from GitHub API
+ * Returns the exact tag name to avoid moving 'latest' redirects
+ */
+async function getLatestReleaseTag(): Promise<string> {
+  const apiUrl = 'https://api.github.com/repos/router-for-me/CLIProxyAPI/releases/latest';
+
+  try {
+    const response = await fetch(apiUrl, {
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': '@tuannvm/ccodex',
+      },
+      signal: AbortSignal.timeout(10000), // 10 second timeout
+    });
+
+    if (!response.ok) {
+      throw new Error(`GitHub API returned ${response.status}`);
+    }
+
+    const data = await safeJsonParse<{ tag_name: string }>(await response.text());
+    if (!data?.tag_name) {
+      throw new Error('Invalid GitHub API response');
+    }
+
+    return data.tag_name;
+  } catch (error) {
+    debugLog('Failed to fetch latest release tag:', error);
+    throw new Error(
+      `Failed to resolve latest release tag from GitHub API: ${error instanceof Error ? error.message : String(error)}\n\n` +
+      'Please check your internet connection or install CLIProxyAPI manually.'
+    );
+  }
+}
+
+/**
  * Install CLIProxyAPI via Homebrew or Go binary fallback
  */
 export async function installProxyApi(): Promise<void> {
@@ -190,21 +257,26 @@ export async function installProxyApi(): Promise<void> {
   // Ensure install directory exists
   await ensureDir(installDir);
 
-  // Download the binary
-  const releaseUrl = `https://github.com/router-for-me/CLIProxyAPI/releases/latest/download/${binaryFileName}`;
+  // Resolve exact release tag first for security (avoid moving 'latest' redirects)
+  console.log('Resolving latest release tag from GitHub API...');
+  const releaseTag = await getLatestReleaseTag();
+  console.log(`Latest release: ${releaseTag}`);
+
+  const baseUrl = `https://github.com/router-for-me/CLIProxyAPI/releases/download/${releaseTag}`;
+  const binaryUrl = `${baseUrl}/${binaryFileName}`;
 
   console.log(`Downloading ${binaryFileName} from GitHub releases...`);
 
   const fs = await import('fs/promises');
 
   try {
-    // Download with timeout
+    // Download binary with timeout
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
     let response: Response;
     try {
-      response = await fetch(releaseUrl, { signal: controller.signal });
+      response = await fetch(binaryUrl, { signal: controller.signal });
     } finally {
       clearTimeout(timeout);
     }
@@ -212,13 +284,73 @@ export async function installProxyApi(): Promise<void> {
     if (!response.ok) {
       throw new Error(
         `HTTP ${response.status} ${response.statusText}\n` +
-        `URL: ${releaseUrl}\n` +
+        `URL: ${binaryUrl}\n` +
         `Platform/Arch: ${platformSuffix}`
       );
     }
 
     const buffer = await response.arrayBuffer();
     const uint8Array = new Uint8Array(buffer);
+
+    // Calculate SHA-256 checksum of downloaded binary
+    console.log('Calculating SHA-256 checksum...');
+    const actualHash = sha256Hex(uint8Array);
+
+    // Try to download and verify checksums file
+    let checksumVerified = false;
+    const checksumUrls = [
+      `${baseUrl}/SHA256SUMS`,
+      `${baseUrl}/checksums.txt`,
+      `${baseUrl}/checksums.sha256`,
+    ];
+
+    for (const checksumUrl of checksumUrls) {
+      try {
+        console.log(`Attempting checksum verification from: ${new URL(checksumUrl).pathname}`);
+        const checksumResponse = await fetch(checksumUrl, { signal: AbortSignal.timeout(10000) });
+
+        if (checksumResponse.ok) {
+          const checksumContent = await checksumResponse.text();
+          const expectedHash = parseExpectedSha256(checksumContent, binaryFileName);
+
+          if (expectedHash) {
+            if (actualHash === expectedHash) {
+              console.log(chalk.green('✓ Checksum verification passed'));
+              checksumVerified = true;
+              break;
+            } else {
+              await fs.unlink(tempPath).catch(() => {});
+              throw new Error(
+                `Checksum verification failed!\n` +
+                `Expected: ${expectedHash}\n` +
+                `Actual:   ${actualHash}\n\n` +
+                `The downloaded binary may be corrupted or tampered with.\n` +
+                `Please try again or install CLIProxyAPI manually.`
+              );
+            }
+          }
+        }
+      } catch (checksumError) {
+        debugLog(`Checksum verification failed for ${checksumUrl}:`, checksumError);
+        // Try next checksum URL
+      }
+    }
+
+    if (!checksumVerified) {
+      console.log(chalk.yellow('⚠ Warning: Could not verify binary checksum'));
+      console.log(chalk.yellow('  The downloaded binary was not verified against a checksum file.'));
+      console.log(chalk.yellow('  This may indicate a network issue or that checksums are not published.'));
+      console.log(chalk.yellow(''));
+      console.log(chalk.yellow('  SECURITY NOTE: Without checksum verification, the binary could be'));
+      console.log(chalk.yellow('  corrupted or tampered with during transit.'));
+      console.log(chalk.yellow(''));
+      console.log(chalk.yellow('  To proceed safely:'));
+      console.log(chalk.yellow('  1. Check your internet connection and try again'));
+      console.log(chalk.yellow('  2. Or install CLIProxyAPI manually from:'));
+      console.log(chalk.yellow(`     ${baseUrl}/`));
+      console.log(chalk.yellow(''));
+      console.log(chalk.yellow('  Continuing with unverified binary (--version validation only)...'));
+    }
 
     // Atomic write: download to temp file first
     await fs.writeFile(tempPath, uint8Array, { mode: 0o755 });

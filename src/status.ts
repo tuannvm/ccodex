@@ -1,7 +1,7 @@
 import chalk from 'chalk';
-import { hasCommand } from './utils.js';
 import { detectProxyCommand, isProxyRunning, checkAuthConfigured } from './proxy.js';
 import { isShellIntegrationConfigured } from './aliases.js';
+import { detectClaudeCommand } from './claude.js';
 import type { StatusResult } from './types.js';
 
 /**
@@ -40,7 +40,7 @@ export async function getStatus(): Promise<StatusResult> {
   const proxyRunning = await isProxyRunning();
   const auth = await checkAuthConfigured();
   const shellIntegration = await isShellIntegrationConfigured();
-  const claudeCli = await hasCommand('claude');
+  const claudeCmd = await detectClaudeCommand();
 
   return {
     proxyCommand: proxyCmd.cmd !== null,
@@ -48,13 +48,13 @@ export async function getStatus(): Promise<StatusResult> {
     authConfigured: auth.configured,
     aliasesInstalled: shellIntegration,
     shellIntegration,
-    claudeCliAvailable: claudeCli,
+    claudeCliAvailable: claudeCmd.cmd !== null,
     ready:
       proxyCmd.cmd !== null &&
       proxyRunning &&
       auth.configured &&
       shellIntegration &&
-      claudeCli,
+      claudeCmd.cmd !== null,
   };
 }
 
