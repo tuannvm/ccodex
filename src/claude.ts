@@ -185,11 +185,20 @@ export async function runClaude(args: string[]): Promise<void> {
   const secretPatterns = [
     /_API_KEY$/i,
     /_APIKEY$/i,
+    /_ACCESS_KEY$/i,           // AWS_ACCESS_KEY_ID
+    /_SECRET_KEY$/i,           // AWS_SECRET_ACCESS_KEY
+    /_SESSION_TOKEN$/i,        // AWS_SESSION_TOKEN
     /_TOKEN$/i,
     /_SECRET$/i,
     /_PASSWORD$/i,
     /_PRIVATE_KEY$/i,
     /_AUTH$/i,
+    /^GITHUB_PAT$/i,           // GitHub Personal Access Token
+    /^GITHUB_TOKEN$/i,
+    /^GITLAB_TOKEN$/i,
+    /^BITBUCKET_TOKEN$/i,
+    /^NPM_TOKEN$/i,
+    /^CI?$/i,                  // CI variable often contains secrets
   ];
 
   // Helper to check if a variable name looks like a secret

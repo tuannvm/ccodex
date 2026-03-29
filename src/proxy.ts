@@ -20,16 +20,19 @@ export async function detectProxyCommand(): Promise<ProxyCommand> {
 
   if (await hasCommand('cliproxyapi')) {
     try {
-      const path = await execCommand('which', ['cliproxyapi']);
+      // Use 'where' on Windows, 'which' on Unix/macOS
+      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+      const path = await execCommand(whichCmd, ['cliproxyapi']);
       return { cmd: 'cliproxyapi', path };
     } catch {
-      // which might fail, continue anyway
+      // which/where might fail, continue anyway
       return { cmd: 'cliproxyapi', path: null };
     }
   }
   if (await hasCommand('cliproxy')) {
     try {
-      const path = await execCommand('which', ['cliproxy']);
+      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+      const path = await execCommand(whichCmd, ['cliproxy']);
       return { cmd: 'cliproxy', path };
     } catch {
       return { cmd: 'cliproxy', path: null };
@@ -350,20 +353,26 @@ export async function installProxyApi(): Promise<void> {
       throw checksumMismatchError;
     }
 
+    // SECURITY: Fail closed if checksum verification is not available
+    // This prevents installation of potentially tampered binaries
     if (!checksumVerified) {
-      console.log(chalk.yellow('⚠ Warning: Could not verify binary checksum'));
-      console.log(chalk.yellow('  The downloaded binary was not verified against a checksum file.'));
-      console.log(chalk.yellow('  This may indicate a network issue or that checksums are not published.'));
-      console.log(chalk.yellow(''));
-      console.log(chalk.yellow('  SECURITY NOTE: Without checksum verification, the binary could be'));
-      console.log(chalk.yellow('  corrupted or tampered with during transit.'));
-      console.log(chalk.yellow(''));
-      console.log(chalk.yellow('  To proceed safely:'));
-      console.log(chalk.yellow('  1. Check your internet connection and try again'));
-      console.log(chalk.yellow('  2. Or install CLIProxyAPI manually from:'));
-      console.log(chalk.yellow(`     ${baseUrl}/`));
-      console.log(chalk.yellow(''));
-      console.log(chalk.yellow('  Continuing with unverified binary (--version validation only)...'));
+      await fs.unlink(tempPath).catch(() => {});
+      throw new Error(
+        chalk.red('Checksum verification required but failed.\n\n') +
+        'The downloaded binary could not be verified against a checksum file.\n' +
+        'This is a security requirement to prevent installation of tampered binaries.\n\n' +
+        'Possible reasons:\n' +
+        '  - Network issues prevented checksum file download\n' +
+        '  - Checksum files are not published for this release\n' +
+        '  - GitHub releases are temporarily unavailable\n\n' +
+        'To install CLIProxyAPI safely:\n' +
+        `  1. Visit ${baseUrl}/\n` +
+        '  2. Download the binary and checksum files manually\n' +
+        '  3. Verify the checksums match\n' +
+        '  4. Place the binary in a directory in your PATH\n' +
+        '  5. Make it executable: chmod +x cliproxyapi\n\n' +
+        'Then run ccodex again.'
+      );
     }
 
     // Atomic write: download to temp file first

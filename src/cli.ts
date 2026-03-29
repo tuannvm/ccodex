@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   program
     .name('ccodex')
     .description('TypeScript reimplementation of ccodex - run Claude Code with OpenAI GPT models')
-    .version('0.1.6')
+    .version('0.1.7')
     .option('--login', 'Run ChatGPT/Codex OAuth login')
     .option('--status', 'Show setup status')
     .option('--diagnose', 'Show proxy and auth diagnostics')
@@ -173,8 +173,8 @@ async function main(): Promise<void> {
 
   const options = program.opts();
 
-  // Preflight check for all operations except --status (read-only diagnostics)
-  if (!options.status) {
+  // Preflight check for all operations except read-only diagnostics (--status, --diagnose)
+  if (!options.status && !options.diagnose) {
     preflightOrThrow();
   }
 
