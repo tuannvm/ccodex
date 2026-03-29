@@ -8,6 +8,53 @@ import { printStatus, readyCheck } from './status.js';
 import { runClaude, detectClaudeCommand, installClaudeCode } from './claude.js';
 
 /**
+ * Show proxy and auth diagnostic information
+ */
+async function showProxyDiagnostics(): Promise<void> {
+  const { isProxyRunning, checkAuthConfigured, detectProxyCommand } = await import('./proxy.js');
+
+  console.log('');
+  console.log(chalk.bold('Proxy & Auth Diagnostics'));
+  console.log('');
+
+  // Check proxy command
+  const proxyCmd = await detectProxyCommand();
+  if (proxyCmd.cmd) {
+    console.log(chalk.green(`✓ Proxy command found:`), proxyCmd.cmd);
+    if (proxyCmd.path) {
+      console.log(chalk.gray(`  Path: ${proxyCmd.path}`));
+    }
+  } else {
+    console.log(chalk.red('✗ Proxy command NOT found'));
+  }
+
+  // Check if proxy is running
+  const proxyRunning = await isProxyRunning();
+  if (proxyRunning) {
+    console.log(chalk.green('✓ Proxy is running'), chalk.gray('(127.0.0.1:8317)'));
+  } else {
+    console.log(chalk.red('✗ Proxy is NOT running'));
+  }
+
+  // Check auth status
+  const auth = await checkAuthConfigured();
+  console.log('');
+
+  if (auth.hasModels) {
+    console.log(chalk.green('✓ Auth: Models accessible (proxy has valid credentials)'));
+  } else if (auth.hasAuthEntries) {
+    console.log(chalk.yellow('⚠ Auth: Entries exist but models not accessible'));
+  } else if (auth.hasAuthFiles) {
+    console.log(chalk.yellow('⚠ Auth: Files exist but not loaded'));
+  } else {
+    console.log(chalk.red('✗ Auth: No credentials found'));
+  }
+
+  console.log('');
+  console.log(chalk.gray('If you see errors above, try: npx -y @tuannvm/ccodex --login'));
+}
+
+/**
  * Preflight check - validate platform and capabilities before main operations
  * Only runs for non-status commands to allow read-only diagnostics anywhere
  */
@@ -114,6 +161,7 @@ async function main(): Promise<void> {
     .version('0.1.4')
     .option('--login', 'Run ChatGPT/Codex OAuth login')
     .option('--status', 'Show setup status')
+    .option('--diagnose', 'Show proxy and auth diagnostics')
     .allowUnknownOption(true)
     .allowExcessArguments(true)
     .parse(process.argv);
@@ -143,15 +191,43 @@ async function main(): Promise<void> {
     await configureShellIntegration();
     await startProxy();
 
-    // Always launch login flow for --login, even if already authenticated
-    // This allows users to switch accounts or refresh their session
+    // Check current auth status
+    const authBefore = await checkAuthConfigured();
+    if (authBefore.configured) {
+      console.log(chalk.green('✓ Already authenticated. Launching login to re-authorize...'));
+    } else {
+      console.log(chalk.yellow('Not authenticated. Starting OAuth login flow...'));
+    }
+
+    // Launch login
     await launchLogin();
+
+    // Wait for authentication to complete
+    console.log('Waiting for OAuth authentication to complete...');
+    await waitForAuth();
+
+    // Verify auth worked
+    const authAfter = await checkAuthConfigured();
+    if (!authAfter.configured) {
+      console.log(chalk.yellow('Authentication may not have completed. Please try:'));
+      console.log('  1. Check if browser login completed');
+      console.log('  2. Run: npx -y @tuannvm/ccodex --login');
+      console.log('  3. Or restart the proxy and try again');
+    } else {
+      console.log(chalk.green('✓ Authentication successful! You can now use ccodex.'));
+    }
     return;
   }
 
   // Handle --status (read-only, no side effects)
   if (options.status) {
     await printStatus();
+    return;
+  }
+
+  // Handle --diagnose (show detailed diagnostics)
+  if (options.diagnose) {
+    await showProxyDiagnostics();
     return;
   }
 
@@ -168,6 +244,12 @@ main().catch((error) => {
   const err = error instanceof Error ? error : new Error(String(error));
 
   console.error(chalk.red('Error:'), err.message);
+
+  // Suggest diagnostics for auth errors
+  if (err.message.includes('401') || err.message.includes('Invalid API key') || err.message.includes('authentication')) {
+    console.error('');
+    console.error(chalk.yellow('For troubleshooting, run:'), chalk.bold('npx -y @tuannvm/ccodex --diagnose'));
+  }
 
   // Print stack trace in debug mode
   if (process.env.DEBUG || process.env.CCODEX_DEBUG) {
