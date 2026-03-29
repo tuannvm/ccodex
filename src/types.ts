@@ -3,7 +3,7 @@
  */
 export interface Platform {
   os: 'darwin' | 'linux' | 'windows';
-  shell: 'zsh' | 'bash' | 'cmd' | 'powershell' | unknown;
+  shell: 'zsh' | 'bash' | 'cmd' | 'powershell' | null;
   home: string;
 }
 

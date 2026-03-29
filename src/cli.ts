@@ -3,12 +3,20 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { detectProxyCommand, installProxyApi, startProxy, launchLogin, waitForAuth, checkAuthConfigured } from './proxy.js';
-import { installAliases, configureShellIntegration } from './aliases.js';
+import { configureShellIntegration } from './aliases.js';
 import { printStatus, readyCheck } from './status.js';
 import { runClaude, detectClaudeCommand, installClaudeCode } from './claude.js';
 
 /**
  * Ensure everything is set up (idempotent)
+ * Implements steps 1-5 of the ccodex workflow:
+ * 1. Check/install Claude Code CLI
+ * 2. Check/install CLIProxyAPI
+ * 3. Configure shell integration (adds aliases directly to rc files)
+ * 4. Start proxy
+ * 5. Launch OAuth login if needed
+ *
+ * Step 6 (Run Claude Code) is handled by main() after setup completes.
  */
 async function ensureSetup(): Promise<void> {
   let needsSetup = false;
@@ -28,10 +36,7 @@ async function ensureSetup(): Promise<void> {
     needsSetup = true;
   }
 
-  // 3. Install aliases (claude-openai, ccodex)
-  await installAliases();
-
-  // 4. Configure shell integration
+  // 3. Configure shell integration (adds aliases directly to rc files)
   await configureShellIntegration();
 
   // 5. Start proxy
@@ -70,7 +75,7 @@ async function main(): Promise<void> {
 
   // Handle --login
   if (options.login) {
-    // Ensure setup (installs dependencies, starts proxy)
+    // Ensure setup (installs dependencies, configures shell, starts proxy)
     // Skip the auth part of ensureSetup by checking first
     const claudeCmd = await detectClaudeCommand();
     if (!claudeCmd.cmd) {
@@ -83,7 +88,6 @@ async function main(): Promise<void> {
       await installProxyApi();
     }
 
-    await installAliases();
     await configureShellIntegration();
     await startProxy();
 
@@ -93,11 +97,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  // Handle --status
+  // Handle --status (read-only, no side effects)
   if (options.status) {
-    // Ensure setup is done before showing status
-    // This ensures proxy is running and status is accurate
-    await ensureSetup();
     await printStatus();
     return;
   }
@@ -111,6 +112,15 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(chalk.red('Error:'), error.message);
+  // Normalize error to Error instance
+  const err = error instanceof Error ? error : new Error(String(error));
+
+  console.error(chalk.red('Error:'), err.message);
+
+  // Print stack trace in debug mode
+  if (process.env.DEBUG || process.env.CCODEX_DEBUG) {
+    console.error(chalk.gray(err.stack));
+  }
+
   process.exit(1);
 });

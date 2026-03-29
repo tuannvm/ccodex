@@ -1,5 +1,5 @@
 {
-  "name": "ccodex",
+  "name": "@tuannvm/ccodex",
   "version": "0.1.0",
   "description": "TypeScript reimplementation of ccodex - run Claude Code with OpenAI GPT models via CLIProxyAPI",
   "type": "module",

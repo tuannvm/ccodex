@@ -152,7 +152,7 @@ export async function startProxy(): Promise<void> {
   const cmdResult = await detectProxyCommand();
   const proxyCmd = cmdResult.cmd;
   if (!proxyCmd) {
-    throw new Error('CLIProxyAPI not found. Run: npx -y ccodex');
+    throw new Error('CLIProxyAPI not found. Run: npx -y @tuannvm/ccodex');
   }
 
   console.log('Starting CLIProxyAPI in background...');
@@ -165,7 +165,18 @@ export async function startProxy(): Promise<void> {
 
   let out: Awaited<ReturnType<typeof fs.open>> | null = null;
   try {
+    // Create log with restrictive permissions (user read/write only)
     out = await fs.open(logFile, 'a');
+
+    // Set restrictive permissions on Unix/macOS (0600 = user read/write only)
+    if (process.platform !== 'win32') {
+      try {
+        await fs.chmod(logFile, 0o600);
+      } catch {
+        // If chmod fails, continue anyway - the file was created successfully
+        debugLog('Warning: Could not set restrictive permissions on log file');
+      }
+    }
 
     const child = spawn(proxyCmd, [], {
       detached: true,
@@ -206,7 +217,7 @@ export async function launchLogin(): Promise<void> {
   const cmdResult = await detectProxyCommand();
   const proxyCmd = cmdResult.cmd;
   if (!proxyCmd) {
-    throw new Error('CLIProxyAPI not found. Run: npx -y ccodex');
+    throw new Error('CLIProxyAPI not found. Run: npx -y @tuannvm/ccodex');
   }
 
   console.log('Launching ChatGPT/Codex OAuth login in browser...');

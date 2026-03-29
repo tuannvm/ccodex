@@ -8,7 +8,7 @@
 // Re-export main functions
 export { runClaude } from './claude.js';
 export { detectProxyCommand, isProxyRunning, checkAuthConfigured, installProxyApi, startProxy, launchLogin, waitForAuth } from './proxy.js';
-export { installAliases, configureShellIntegration, hasAliasFile, isShellIntegrationConfigured } from './aliases.js';
+export { configureShellIntegration, isShellIntegrationConfigured } from './aliases.js';
 export { printStatus, readyCheck, getStatus } from './status.js';
 
 // Types

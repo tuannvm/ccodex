@@ -20,7 +20,7 @@ export function debugLog(message: string, ...args: unknown[]): void {
 /**
  * Execute a command and return stdout
  */
-export async function execCommand(cmd: string, args: string[] = []): Promise<string> {
+export async function execCommand(cmd: string, args: string[] = [], timeoutMs = 10000): Promise<string> {
   return new Promise((resolve, reject) => {
     const child = spawnCmd(cmd, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -37,7 +37,14 @@ export async function execCommand(cmd: string, args: string[] = []): Promise<str
       stderr += data.toString();
     });
 
+    // Add timeout to prevent hangs
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Command timed out: ${cmd} ${args.join(' ')}`));
+    }, timeoutMs);
+
     child.on('close', (code: number | null) => {
+      clearTimeout(timeout);
       if (code === 0) {
         resolve(stdout.trim());
       } else {
@@ -46,6 +53,7 @@ export async function execCommand(cmd: string, args: string[] = []): Promise<str
     });
 
     child.on('error', (error: unknown) => {
+      clearTimeout(timeout);
       const err = error instanceof Error ? error : new Error(String(error));
       reject(err);
     });
@@ -61,17 +69,14 @@ export async function hasCommand(cmd: string): Promise<boolean> {
     const isWindows = process.platform === 'win32';
 
     if (isWindows) {
-      // On Windows, try to spawn the command with --version or --help
-      // Most CLIs support one of these
-      for (const flag of ['--version', '--help', 'version', 'help']) {
-        try {
-          await execCommand(cmd, [flag]);
-          return true;
-        } catch {
-          // Try next flag
-        }
+      // On Windows, try to spawn the command with --version only
+      // Use short timeout to avoid hangs on interactive commands
+      try {
+        await execCommand(cmd, ['--version'], 3000);
+        return true;
+      } catch {
+        return false;
       }
-      return false;
     } else {
       // On Unix/macOS, use the which command
       await execCommand('which', [cmd]);
@@ -103,7 +108,7 @@ export function detectPlatform(): Platform {
   }
 
   // Detect shell
-  let shell: 'zsh' | 'bash' | 'cmd' | 'powershell' | unknown = 'unknown';
+  let shell: 'zsh' | 'bash' | 'cmd' | 'powershell' | null = null;
   const shellEnv = process.env.SHELL || '';
 
   if (shellEnv.includes('zsh')) {
@@ -138,22 +143,6 @@ export function getShellRcFile(platform: Platform): string {
     return join(platform.home, '.bashrc');
   }
   return join(platform.home, '.zshrc'); // default to zsh on Unix
-}
-
-/**
- * Get alias file path
- * Platform-specific alias file location
- */
-export function getAliasFile(): string {
-  const pltfrm = detectPlatform();
-
-  if (pltfrm.os === 'windows') {
-    // Windows: use PowerShell profile location or home directory
-    return join(pltfrm.home, 'ccodex-alias.ps1');
-  }
-
-  // Unix/macOS: use Oh My Zsh custom directory
-  return join(pltfrm.home, '.oh-my-zsh', 'custom', 'ccodex-alias.zsh');
 }
 
 /**

@@ -54,7 +54,7 @@ export async function installClaudeCode(): Promise<void> {
  */
 export async function runClaude(args: string[]): Promise<void> {
   if (!(await hasCommand('claude'))) {
-    throw new Error('claude CLI not found in PATH\nInstall Claude Code CLI first, then rerun ccodex.');
+    throw new Error('claude CLI not found in PATH\nInstall Claude Code CLI first, then rerun: npx -y @tuannvm/ccodex');
   }
 
   // Ensure proxy is running
@@ -89,11 +89,14 @@ export async function runClaude(args: string[]): Promise<void> {
     ...process.env,
   };
 
-  // Explicitly unset Anthropic keys to force use of proxy
+  // Explicitly unset ALL API keys to force use of proxy auth only
+  // NO API key fallback - authentication must happen through ChatGPT OAuth
   delete env.ANTHROPIC_API_KEY;
   delete env.CLAUDE_API_KEY;
+  delete env.OPENAI_API_KEY;  // Ensure no OpenAI API key fallback
 
-  // Set proxy config
+  // Set proxy config - dummy token is replaced by CLIProxyAPI's OAuth credentials
+  // The proxy handles ChatGPT authentication, this is just a format placeholder
   env.ANTHROPIC_AUTH_TOKEN = 'sk-dummy';
   env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:8317';
   env.API_TIMEOUT_MS = '120000';

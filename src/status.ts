@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { hasCommand } from './utils.js';
 import { detectProxyCommand, isProxyRunning, checkAuthConfigured } from './proxy.js';
-import { hasAliasFile, isShellIntegrationConfigured } from './aliases.js';
+import { isShellIntegrationConfigured } from './aliases.js';
 import type { StatusResult } from './types.js';
 
 /**
@@ -39,7 +39,6 @@ export async function getStatus(): Promise<StatusResult> {
   const proxyCmd = await detectProxyCommand();
   const proxyRunning = await isProxyRunning();
   const auth = await checkAuthConfigured();
-  const aliasFile = await hasAliasFile();
   const shellIntegration = await isShellIntegrationConfigured();
   const claudeCli = await hasCommand('claude');
 
@@ -47,14 +46,13 @@ export async function getStatus(): Promise<StatusResult> {
     proxyCommand: proxyCmd.cmd !== null,
     proxyRunning,
     authConfigured: auth.configured,
-    aliasesInstalled: aliasFile,
+    aliasesInstalled: shellIntegration,
     shellIntegration,
     claudeCliAvailable: claudeCli,
     ready:
       proxyCmd.cmd !== null &&
       proxyRunning &&
       auth.configured &&
-      aliasFile &&
       shellIntegration &&
       claudeCli,
   };
@@ -78,7 +76,7 @@ export async function readyCheck(): Promise<boolean> {
   console.log(
     chalk.yellow('Not ready: run') +
       ' ' +
-      chalk.bold('npx -y ccodex') +
+      chalk.bold('npx -y @tuannvm/ccodex') +
       ' again to complete setup.'
   );
   return false;

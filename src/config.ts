@@ -18,9 +18,6 @@ export const CONFIG = {
   AUTH_DIR_NAME: '.cli-proxy-api',
   CACHE_DIR_NAME: '.cache',
   LOG_FILE_NAME: 'ccodex-cliproxy.log',
-  ALIAS_FILE_NAME: 'ccodex-alias.zsh',
-  ALIAS_DIR: '.oh-my-zsh/custom',
-  LOCAL_BIN_DIR: '.local/bin',
   CLAUDE_CONFIG_DIR: '.claude-openai',
 
   // Timeouts (in milliseconds)
@@ -46,18 +43,4 @@ export function getAuthDir(): string {
  */
 export function getLogFilePath(): string {
   return join(homedir(), CONFIG.CACHE_DIR_NAME, CONFIG.LOG_FILE_NAME);
-}
-
-/**
- * Get alias file path
- */
-export function getAliasFilePath(): string {
-  return join(homedir(), CONFIG.ALIAS_DIR, CONFIG.ALIAS_FILE_NAME);
-}
-
-/**
- * Get local bin path
- */
-export function getLocalBinPath(): string {
-  return join(homedir(), CONFIG.LOCAL_BIN_DIR);
 }

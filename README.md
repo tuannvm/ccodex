@@ -1,11 +1,11 @@
-# ccodex
+# @tuannvm/ccodex
 
 TypeScript reimplementation of `ccodex` — run Claude Code CLI with OpenAI GPT models via CLIProxyAPI.
 
 ## Quick Start
 
 ```bash
-npx -y ccodex
+npx -y @tuannvm/ccodex
 ```
 
 That's it. `ccodex` will automatically:
@@ -21,7 +21,7 @@ That's it. `ccodex` will automatically:
 
 ```bash
 # First run - sets everything up automatically
-npx -y ccodex
+npx -y @tuannvm/ccodex
 
 # After setup - use aliases
 ccodex
