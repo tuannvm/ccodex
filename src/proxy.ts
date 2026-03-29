@@ -1088,6 +1088,7 @@ log:
     const child = spawn(proxyExe, ["-config", configPath], {
       detached: true,
       stdio: ["ignore", out.fd, out.fd],
+      env: { ...process.env, HOME: home }, // Pass environment so mkdir and other commands work
     });
 
     // Handle spawn errors immediately (fail-fast)
