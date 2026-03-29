@@ -1130,6 +1130,7 @@ export async function launchLogin(): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const child = spawnCmd(proxyExe, ["-codex-login"], {
       stdio: "inherit",
+      env: { ...process.env }, // Ensure environment is available
     });
 
     child.on("close", (code: number | null) => {
