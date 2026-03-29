@@ -1,0 +1,48 @@
+# Source files
+src/
+*.ts
+*.map
+tsconfig.json
+
+# Development files
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build artifacts (keep dist, it's included in package)
+dist/**/*.map
+
+# Test files
+test/
+tests/
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+
+# Documentation (keep README.md)
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Package tarballs (don't publish our own packages)
+*.tgz
+
+# Ralph loop files
+.claude/
+.ralph-loop.local.md
