@@ -1,4 +1,4 @@
-import { join } from 'path';
+import { join, dirname } from "path";
 import {
   getShellRcFile,
   ensureDir,
@@ -7,11 +7,11 @@ import {
   fileExists,
   detectPlatform,
   isInteractive,
-} from './utils.js';
-import { installPowerShellAliases, isPowerShellIntegrationConfigured } from './powershell.js';
+} from "./utils.js";
+import { installPowerShellAliases, isPowerShellIntegrationConfigured } from "./powershell.js";
 
 // Use npx directly - no local bin installation
-const CCODEX_NPX_CMD = 'npx -y @tuannvm/ccodex';
+const CCODEX_NPX_CMD = "npx -y @tuannvm/ccodex";
 
 /**
  * Generate alias content for Unix shells (zsh/bash)
@@ -49,7 +49,7 @@ fi
  * Checks for our START marker to identify our alias block
  */
 function hasCcodexBlock(content: string): boolean {
-  return content.includes('# >>> ccodex aliases START >>>');
+  return content.includes("# >>> ccodex aliases START >>>");
 }
 
 /**
@@ -60,7 +60,7 @@ function hasCcodexBlock(content: string): boolean {
 function removeCcodexBlock(content: string): string {
   // Match the entire ccodex alias block from START marker to END marker
   const blockRegex = /# >>> ccodex aliases START >>>[\s\S]*?# <<< ccodex aliases END <<<\n?/g;
-  return content.replace(blockRegex, '').trimEnd();
+  return content.replace(blockRegex, "").trimEnd();
 }
 
 /**
@@ -70,12 +70,12 @@ function removeCcodexBlock(content: string): string {
  */
 async function addAliasesToRc(rcFile: string): Promise<void> {
   // Ensure rc file directory exists
-  await ensureDir(join(rcFile, '..'));
+  await ensureDir(dirname(rcFile));
 
   // Create rc file if it doesn't exist
-  const fs = await import('fs/promises');
+  const fs = await import("fs/promises");
   try {
-    await fs.writeFile(rcFile, '', { flag: 'wx' });
+    await fs.writeFile(rcFile, "", { flag: "wx" });
   } catch {
     // File exists, that's fine
   }
@@ -87,7 +87,7 @@ async function addAliasesToRc(rcFile: string): Promise<void> {
     // Remove existing block to prevent duplicates
     content = removeCcodexBlock(content);
     // Write back the cleaned content
-    await fs.writeFile(rcFile, content + '\n', 'utf-8');
+    await fs.writeFile(rcFile, content + "\n", "utf-8");
     console.log(`Cleaned existing ccodex aliases: ${rcFile}`);
   }
 
@@ -104,10 +104,10 @@ export async function configureShellIntegration(): Promise<void> {
   const platform = detectPlatform();
 
   // On Windows, use PowerShell
-  if (platform.os === 'windows') {
-    console.log('\nConfiguring PowerShell integration...');
+  if (platform.os === "windows") {
+    console.log("\nConfiguring PowerShell integration...");
     await installPowerShellAliases();
-    console.log('PowerShell aliases installed. Restart PowerShell to use them.');
+    console.log("PowerShell aliases installed. Restart PowerShell to use them.");
     return;
   }
 
@@ -124,47 +124,50 @@ export async function configureShellIntegration(): Promise<void> {
 
   // Interactive: ask user
   // Determine default based on current shell
-  const defaultChoice = platform.shell === 'bash' ? '2' : '1';
-  const defaultName = platform.shell === 'bash' ? '~/.bashrc' : '~/.zshrc';
+  const defaultChoice = platform.shell === "bash" ? "2" : "1";
+  const defaultName = platform.shell === "bash" ? "~/.bashrc" : "~/.zshrc";
 
-  console.log('\nChoose shell rc file for ccodex aliases:');
-  console.log('  1) ~/.zshrc');
-  console.log('  2) ~/.bashrc');
-  console.log('  3) Both');
-  console.log('  4) Skip (manual setup)');
+  console.log("\nChoose shell rc file for ccodex aliases:");
+  console.log("  1) ~/.zshrc");
+  console.log("  2) ~/.bashrc");
+  console.log("  3) Both");
+  console.log("  4) Skip (manual setup)");
 
-  const readline = await import('readline');
+  const readline = await import("readline");
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
   });
 
   const choice = await new Promise<string>((resolve) => {
-    rl.question(`Select [1-4] (default: ${defaultChoice}, detected: ${defaultName}): `, (answer) => {
-      rl.close();
-      resolve(answer || defaultChoice);
-    });
+    rl.question(
+      `Select [1-4] (default: ${defaultChoice}, detected: ${defaultName}): `,
+      (answer) => {
+        rl.close();
+        resolve(answer || defaultChoice);
+      }
+    );
   });
 
-  const zshrc = join(platform.home, '.zshrc');
-  const bashrc = join(platform.home, '.bashrc');
+  const zshrc = join(platform.home, ".zshrc");
+  const bashrc = join(platform.home, ".bashrc");
 
   switch (choice) {
-    case '1':
+    case "1":
       await addAliasesToRc(zshrc);
       break;
-    case '2':
+    case "2":
       await addAliasesToRc(bashrc);
       break;
-    case '3':
+    case "3":
       await addAliasesToRc(zshrc);
       await addAliasesToRc(bashrc);
       break;
-    case '4':
-      console.log('Skipped rc integration.');
+    case "4":
+      console.log("Skipped rc integration.");
       break;
     default:
-      console.log('Invalid choice. Using ~/.zshrc');
+      console.log("Invalid choice. Using ~/.zshrc");
       await addAliasesToRc(zshrc);
   }
 }
@@ -178,13 +181,13 @@ export async function isShellIntegrationConfigured(): Promise<boolean> {
   const platform = detectPlatform();
 
   // On Windows, check PowerShell integration
-  if (platform.os === 'windows') {
+  if (platform.os === "windows") {
     return await isPowerShellIntegrationConfigured();
   }
 
   // Check both possible rc files (user may have installed to either)
-  const zshrc = join(platform.home, '.zshrc');
-  const bashrc = join(platform.home, '.bashrc');
+  const zshrc = join(platform.home, ".zshrc");
+  const bashrc = join(platform.home, ".bashrc");
 
   for (const rcFile of [zshrc, bashrc]) {
     if (fileExists(rcFile)) {

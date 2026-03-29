@@ -6,10 +6,25 @@
  */
 
 // Re-export main functions
-export { runClaude } from './claude.js';
-export { detectProxyCommand, isProxyRunning, checkAuthConfigured, installProxyApi, startProxy, launchLogin, waitForAuth } from './proxy.js';
-export { configureShellIntegration, isShellIntegrationConfigured } from './aliases.js';
-export { printStatus, readyCheck, getStatus } from './status.js';
+export { runClaude } from "./claude.js";
+export {
+  detectProxyCommand,
+  isProxyRunning,
+  checkAuthConfigured,
+  installProxyApi,
+  startProxy,
+  launchLogin,
+  waitForAuth,
+} from "./proxy.js";
+export { configureShellIntegration, isShellIntegrationConfigured } from "./aliases.js";
+export { printStatus, readyCheck, getStatus } from "./status.js";
 
 // Types
-export type { Platform, ProxyCommand, AuthStatus, StatusResult, CliOptions, ShellConfig } from './types.js';
+export type {
+  Platform,
+  ProxyCommand,
+  AuthStatus,
+  StatusResult,
+  CliOptions,
+  ShellConfig,
+} from "./types.js";

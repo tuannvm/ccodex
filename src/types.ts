@@ -2,8 +2,8 @@
  * Platform detection results
  */
 export interface Platform {
-  os: 'darwin' | 'linux' | 'windows';
-  shell: 'zsh' | 'bash' | 'cmd' | 'powershell' | null;
+  os: "darwin" | "linux" | "windows";
+  shell: "zsh" | "bash" | "cmd" | "powershell" | null;
   home: string;
 }
 
@@ -11,7 +11,7 @@ export interface Platform {
  * CLIProxyAPI command detection
  */
 export interface ProxyCommand {
-  cmd: 'cliproxyapi' | 'cliproxy' | null;
+  cmd: "cli-proxy-api" | "CLIProxyAPI" | "cliproxyapi" | "cliproxy" | null;
   path: string | null;
 }
 

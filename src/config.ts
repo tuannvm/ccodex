@@ -2,12 +2,12 @@
  * Runtime configuration constants
  */
 
-import { join } from 'path';
-import { homedir } from 'os';
+import { join } from "path";
+import { homedir } from "os";
 
 export const CONFIG = {
   // Proxy configuration
-  PROXY_HOST: '127.0.0.1',
+  PROXY_HOST: "127.0.0.1",
   PROXY_PORT: 8317,
   PROXY_STARTUP_MAX_RETRIES: 10,
   PROXY_STARTUP_RETRY_DELAY_MS: 1000,
@@ -15,10 +15,10 @@ export const CONFIG = {
   AUTH_WAIT_RETRY_DELAY_MS: 1000,
 
   // Paths
-  AUTH_DIR_NAME: '.cli-proxy-api',
-  CACHE_DIR_NAME: '.cache',
-  LOG_FILE_NAME: 'ccodex-cliproxy.log',
-  CLAUDE_CONFIG_DIR: '.claude-openai',
+  AUTH_DIR_NAME: ".cli-proxy-api",
+  CACHE_DIR_NAME: ".cache",
+  LOG_FILE_NAME: "ccodex-cliproxy.log",
+  CLAUDE_CONFIG_DIR: ".claude-openai",
 
   // Timeouts (in milliseconds)
   API_TIMEOUT_MS: 120000,

@@ -45,9 +45,9 @@ Every time you run `ccodex`, it:
 
 This makes it "just work" without manual setup steps.
 
-## Production Readiness (v0.1.8)
+## Production Readiness (v0.2.6)
 
-`ccodex` v0.1.8 is production-ready for:
+`ccodex` v0.2.6 is production-ready for:
 - ✅ **macOS** (arm64, x64)
 - ✅ **Linux** (arm64, x64)
 

@@ -1,8 +1,15 @@
-import spawnCmd from 'cross-spawn';
-import { join } from 'path';
-import { homedir } from 'os';
-import { hasCommand, getCommandPath, ensureDir, getUid, fileExists } from './utils.js';
-import { startProxy, checkAuthConfigured, launchLogin, waitForAuth } from './proxy.js';
+import spawnCmd from "cross-spawn";
+import { join } from "path";
+import { homedir } from "os";
+import {
+  hasCommand,
+  getCommandPath,
+  ensureDir,
+  getUid,
+  fileExists,
+  requireTrustedCommand,
+} from "./utils.js";
+import { startProxy, checkAuthConfigured, launchLogin, waitForAuth } from "./proxy.js";
 
 // Track locally installed Claude CLI path for this process
 let installedClaudePath: string | null = null;
@@ -16,15 +23,15 @@ let installedClaudePath: string | null = null;
 function getPersistentLocalClaudePath(): string {
   const home = homedir();
 
-  if (process.platform === 'win32') {
+  if (process.platform === "win32") {
     // Windows: npm installs to AppData/local/prefix, with .cmd wrappers
     // Try claude.cmd first (npm wrapper), then claude.exe (actual binary)
-    const localPrefix = join(home, 'AppData', 'Local', 'ccodex', 'npm');
-    return join(localPrefix, 'node_modules', '.bin', 'claude.cmd');
+    const localPrefix = join(home, "AppData", "Local", "ccodex", "npm");
+    return join(localPrefix, "node_modules", ".bin", "claude.cmd");
   }
 
   // Unix/macOS: ~/.local/ccodex/npm/node_modules/.bin/claude
-  return join(home, '.local', 'ccodex', 'npm', 'node_modules', '.bin', 'claude');
+  return join(home, ".local", "ccodex", "npm", "node_modules", ".bin", "claude");
 }
 
 /**
@@ -49,9 +56,9 @@ export async function detectClaudeCommand(): Promise<{ cmd: string | null; path:
   }
 
   // 3. Check system PATH for global installation
-  if (await hasCommand('claude')) {
-    const resolved = await getCommandPath('claude');
-    return { cmd: 'claude', path: resolved };
+  if (await hasCommand("claude")) {
+    const resolved = await getCommandPath("claude");
+    return { cmd: "claude", path: resolved };
   }
   return { cmd: null, path: null };
 }
@@ -60,17 +67,18 @@ export async function detectClaudeCommand(): Promise<{ cmd: string | null; path:
  * Helper to run npm install and capture stderr
  */
 async function runNpmInstall(args: string[]): Promise<{ ok: boolean; stderr: string }> {
-  const spawn = (await import('cross-spawn')).default;
+  const npmPath = await requireTrustedCommand("npm");
+  const spawn = (await import("cross-spawn")).default;
   return new Promise((resolve, reject) => {
-    const child = spawn('npm', args, { stdio: ['ignore', 'inherit', 'pipe'] });
-    let stderr = '';
-    child.stderr?.on('data', (d: Buffer) => {
+    const child = spawn(npmPath, args, { stdio: ["ignore", "inherit", "pipe"] });
+    let stderr = "";
+    child.stderr?.on("data", (d: Buffer) => {
       const s = d.toString();
       stderr += s;
       process.stderr.write(s);
     });
-    child.on('error', reject);
-    child.on('close', code => resolve({ ok: code === 0, stderr }));
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ ok: code === 0, stderr }));
   });
 }
 
@@ -79,38 +87,43 @@ async function runNpmInstall(args: string[]): Promise<{ ok: boolean; stderr: str
  */
 export async function installClaudeCode(): Promise<void> {
   // Check if npm is available
-  if (!(await hasCommand('npm'))) {
-    throw new Error('npm not found. Install Node.js with npm first.');
+  if (!(await hasCommand("npm"))) {
+    throw new Error("npm not found. Install Node.js with npm first.");
   }
 
-  console.log('Installing Claude Code CLI via npm...');
+  console.log("Installing Claude Code CLI via npm...");
 
   // Try global install first
-  const global = await runNpmInstall(['install', '-g', '@anthropic-ai/claude-code']);
+  const global = await runNpmInstall(["install", "-g", "@anthropic-ai/claude-code"]);
   if (global.ok) {
-    console.log('Claude Code CLI installed successfully via npm global');
+    console.log("Claude Code CLI installed successfully via npm global");
     return;
   }
 
   // Check if it was a permission error
   const permissionDenied = /EACCES|permission denied/i.test(global.stderr);
   if (!permissionDenied) {
-    throw new Error('Failed to install Claude Code CLI');
+    throw new Error("Failed to install Claude Code CLI");
   }
 
   // Fallback to local install
   // Use platform-specific local prefix path
   let localPrefix: string;
-  if (process.platform === 'win32') {
-    localPrefix = join(homedir(), 'AppData', 'Local', 'ccodex', 'npm');
+  if (process.platform === "win32") {
+    localPrefix = join(homedir(), "AppData", "Local", "ccodex", "npm");
   } else {
-    localPrefix = join(homedir(), '.local', 'ccodex', 'npm');
+    localPrefix = join(homedir(), ".local", "ccodex", "npm");
   }
   console.log(`Global install denied. Falling back to local prefix: ${localPrefix}`);
 
-  const local = await runNpmInstall(['install', '--prefix', localPrefix, '@anthropic-ai/claude-code']);
+  const local = await runNpmInstall([
+    "install",
+    "--prefix",
+    localPrefix,
+    "@anthropic-ai/claude-code",
+  ]);
   if (!local.ok) {
-    throw new Error('Failed to install Claude Code CLI (global + local fallback both failed)');
+    throw new Error("Failed to install Claude Code CLI (global + local fallback both failed)");
   }
 
   // Store the installed path using the persistent path function
@@ -125,7 +138,9 @@ export async function runClaude(args: string[]): Promise<void> {
   // Detect Claude CLI using comprehensive detection (process-local, persistent local, system PATH)
   const claudeCmd = await detectClaudeCommand();
   if (!claudeCmd.cmd) {
-    throw new Error('claude CLI not found in PATH\nInstall Claude Code CLI first, then rerun: npx -y @tuannvm/ccodex');
+    throw new Error(
+      "claude CLI not found in PATH\nInstall Claude Code CLI first, then rerun: npx -y @tuannvm/ccodex"
+    );
   }
 
   // Use detected command (absolute path or command name)
@@ -137,7 +152,7 @@ export async function runClaude(args: string[]): Promise<void> {
   // Check auth, launch login if needed
   const auth = await checkAuthConfigured();
   if (!auth.configured) {
-    console.log('ChatGPT/Codex auth not configured. Starting login...');
+    console.log("ChatGPT/Codex auth not configured. Starting login...");
     await launchLogin();
     await waitForAuth();
   }
@@ -145,46 +160,51 @@ export async function runClaude(args: string[]): Promise<void> {
   // Set up temp directory (cross-platform)
   const uid = getUid();
   let tmpBase: string;
-  if (process.platform === 'win32') {
+  if (process.platform === "win32") {
     tmpBase = process.env.TEMP || process.env.TMP || `C:\\Temp\\claude-${uid}`;
   } else {
     tmpBase = process.env.TMPDIR || `/tmp/claude-${uid}`;
   }
-  const tmpDir = join(tmpBase, '');
+  const tmpDir = join(tmpBase, "");
   await ensureDir(tmpDir);
 
   // Get user home directory (cross-platform)
-  const { homedir } = await import('os');
+  const { homedir } = await import("os");
   const userHome = homedir();
 
   // Environment for Claude with proxy
   // Minimal allowlist for subprocess environment.
   // Default-deny: only pass values required for process execution and terminal UX.
   const allowedEnvKeys = new Set([
-    'PATH',
-    'HOME',
-    'USERPROFILE',
-    'SYSTEMROOT',
-    'WINDIR',
-    'COMSPEC',
-    'PATHEXT',
-    'TMPDIR',
-    'TMP',
-    'TEMP',
-    'LANG',
-    'LC_ALL',
-    'LC_CTYPE',
-    'TERM',
-    'COLORTERM',
-    'NO_COLOR',
-    'FORCE_COLOR',
-    'CI',
-    'SHELL',
-    'PWD',
-    'OLDPWD',
-    'XDG_CONFIG_HOME',
-    'XDG_CACHE_HOME',
-    'XDG_DATA_HOME',
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "SYSTEMROOT",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TERM",
+    "COLORTERM",
+    "NO_COLOR",
+    "FORCE_COLOR",
+    "CI",
+    "SHELL",
+    "PWD",
+    "OLDPWD",
+    "XDG_CONFIG_HOME",
+    "XDG_CACHE_HOME",
+    "XDG_DATA_HOME",
+    // TLS/certificate support for enterprise environments
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "NODE_EXTRA_CA_CERTS",
+    "NODE_TLS_REJECT_UNAUTHORIZED",
   ]);
 
   const env: Record<string, string> = {};
@@ -192,7 +212,7 @@ export async function runClaude(args: string[]): Promise<void> {
     if (value === undefined) continue;
 
     // On Windows env keys are case-insensitive; normalize for allowlist matching.
-    const normalized = process.platform === 'win32' ? key.toUpperCase() : key;
+    const normalized = process.platform === "win32" ? key.toUpperCase() : key;
     const allowed = allowedEnvKeys.has(normalized);
 
     if (allowed) {
@@ -202,43 +222,43 @@ export async function runClaude(args: string[]): Promise<void> {
 
   // Set proxy config - dummy token is replaced by CLIProxyAPI's OAuth credentials
   // The proxy handles ChatGPT authentication, this is just a format placeholder
-  env.ANTHROPIC_AUTH_TOKEN = 'sk-dummy';
-  env.ANTHROPIC_BASE_URL = 'http://127.0.0.1:8317';
-  env.API_TIMEOUT_MS = '120000';
+  env.ANTHROPIC_AUTH_TOKEN = "sk-dummy";
+  env.ANTHROPIC_BASE_URL = "http://127.0.0.1:8317";
+  env.API_TIMEOUT_MS = "120000";
 
   // Model mappings to GPT-5.3 Codex
-  env.ANTHROPIC_DEFAULT_OPUS_MODEL = 'gpt-5.3-codex(xhigh)';
-  env.ANTHROPIC_MODEL = 'gpt-5.3-codex(medium)';
-  env.ANTHROPIC_DEFAULT_SONNET_MODEL = 'gpt-5.3-codex(high)';
-  env.ANTHROPIC_DEFAULT_HAIKU_MODEL = 'gpt-5.3-codex(low)';
-  env.CLAUDE_CODE_SUBAGENT_MODEL = 'gpt-5.3-codex(medium)';
+  env.ANTHROPIC_DEFAULT_OPUS_MODEL = "gpt-5.3-codex(xhigh)";
+  env.ANTHROPIC_MODEL = "gpt-5.3-codex(medium)";
+  env.ANTHROPIC_DEFAULT_SONNET_MODEL = "gpt-5.3-codex(high)";
+  env.ANTHROPIC_DEFAULT_HAIKU_MODEL = "gpt-5.3-codex(low)";
+  env.CLAUDE_CODE_SUBAGENT_MODEL = "gpt-5.3-codex(medium)";
 
   // Other settings
   env.TMPDIR = tmpDir;
 
   // On Windows, also set TEMP and TMP for compatibility
-  if (process.platform === 'win32') {
+  if (process.platform === "win32") {
     env.TEMP = tmpDir;
     env.TMP = tmpDir;
   }
 
-  env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
-  env.DISABLE_COST_WARNINGS = '1';
-  env.DISABLE_TELEMETRY = '1';
-  env.DISABLE_ERROR_REPORTING = '1';
-  env.CLAUDE_CONFIG_DIR = join(userHome, '.claude-openai');
+  env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1";
+  env.DISABLE_COST_WARNINGS = "1";
+  env.DISABLE_TELEMETRY = "1";
+  env.DISABLE_ERROR_REPORTING = "1";
+  env.CLAUDE_CONFIG_DIR = join(userHome, ".claude-openai");
 
   // Spawn Claude with modified environment
   const child = spawnCmd(claudeExe, args, {
-    stdio: 'inherit',
+    stdio: "inherit",
     env,
   });
 
   return new Promise<void>((resolve, reject) => {
-    child.on('close', (code, signal) => {
+    child.on("close", (code, signal) => {
       // Exit code 0 means success
       // SIGINT (Ctrl+C) or SIGTERM are user-initiated, treat as success
-      if (code === 0 || signal === 'SIGINT' || signal === 'SIGTERM') {
+      if (code === 0 || signal === "SIGINT" || signal === "SIGTERM") {
         resolve();
       } else if (code === 130) {
         // Exit code 130 is also typically from SIGINT (128 + 2)
@@ -249,7 +269,7 @@ export async function runClaude(args: string[]): Promise<void> {
       }
     });
 
-    child.on('error', (error) => {
+    child.on("error", (error) => {
       reject(error);
     });
   });

@@ -2,12 +2,9 @@
  * PowerShell-specific utilities for Windows support
  */
 
-import { join } from 'path';
-import { homedir } from 'os';
-import { fileExists, ensureDir, appendFile, debugLog } from './utils.js';
-
-// Use npx directly - no local bin installation
-const CCODEX_NPX_CMD = 'npx -y @tuannvm/ccodex';
+import { join, dirname } from "path";
+import { homedir } from "os";
+import { fileExists, ensureDir, appendFile, debugLog } from "./utils.js";
 
 /**
  * Get PowerShell profile path
@@ -19,8 +16,8 @@ export function getPowerShellProfilePath(): string | null {
   // Try different PowerShell profile locations
   // Prefer PowerShell 7 profile, fall back to WindowsPowerShell
   const candidates = [
-    join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1'),  // PowerShell 7 (pwsh)
-    join(home, 'Documents', 'WindowsPowerShell', 'Microsoft.PowerShell_profile.ps1'),  // WindowsPowerShell 5.x
+    join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"), // PowerShell 7 (pwsh)
+    join(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1"), // WindowsPowerShell 5.x
   ];
 
   // If a profile file exists, use it
@@ -32,11 +29,12 @@ export function getPowerShellProfilePath(): string | null {
 
   // If using pwsh (PowerShell 7), default to its profile location
   // Check for pwsh by looking for the executable or PSModulePath pattern
-  const isPwsh = process.env.PSModulePath?.includes('PowerShell') &&
-                  !process.env.PSModulePath?.includes('WindowsPowerShell');
+  const isPwsh =
+    process.env.PSModulePath?.includes("PowerShell") &&
+    !process.env.PSModulePath?.includes("WindowsPowerShell");
 
   if (isPwsh) {
-    return candidates[0];  // PowerShell 7 profile
+    return candidates[0]; // PowerShell 7 profile
   }
 
   // Default to WindowsPowerShell path
@@ -68,12 +66,12 @@ function claude-openai {
 export async function installPowerShellAliases(): Promise<boolean> {
   const profilePath = getPowerShellProfilePath();
   if (!profilePath) {
-    debugLog('Could not determine PowerShell profile path');
+    debugLog("Could not determine PowerShell profile path");
     return false;
   }
 
   // Ensure profile directory exists
-  await ensureDir(join(profilePath, '..'));
+  await ensureDir(dirname(profilePath));
 
   // Check if already configured with our aliases
   if (fileExists(profilePath)) {
@@ -83,7 +81,7 @@ export async function installPowerShellAliases(): Promise<boolean> {
     const hasCo = /\bco\s*\{[\s\S]*?npx -y @tuannvm\/ccodex/.test(content);
     const hasClaudeOpenai = /\bclaude-openai\s*\{[\s\S]*?npx -y @tuannvm\/ccodex/.test(content);
     if (hasCcodex && hasCo && hasClaudeOpenai) {
-      console.log('PowerShell aliases already installed');
+      console.log("PowerShell aliases already installed");
       return true;
     }
   }
@@ -100,8 +98,8 @@ export async function installPowerShellAliases(): Promise<boolean> {
  * Read file content (internal helper)
  */
 async function readFile(path: string): Promise<string> {
-  const fs = await import('fs/promises');
-  return await fs.readFile(path, 'utf-8');
+  const fs = await import("fs/promises");
+  return await fs.readFile(path, "utf-8");
 }
 
 /**

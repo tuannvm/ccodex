@@ -1,6 +1,6 @@
 {
   "name": "@tuannvm/ccodex",
-  "version": "0.1.9",
+  "version": "0.3.8",
   "description": "TypeScript reimplementation of ccodex - run Claude Code with OpenAI GPT models via CLIProxyAPI",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,6 +10,10 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
     "prepack": "npm run build",
     "prepublishOnly": "npm run build"
   },
@@ -31,6 +35,10 @@
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",
     "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.0",
     "typescript": "^5.0.0"
   },
   "dependencies": {
