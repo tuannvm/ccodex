@@ -99,11 +99,12 @@ export async function checkAuthConfigured(): Promise<AuthStatus> {
 }
 
 /**
- * Install CLIProxyAPI via Homebrew (macOS/Linux only)
+ * Install CLIProxyAPI via Homebrew or Go binary fallback
  */
 export async function installProxyApi(): Promise<void> {
   // Check platform
   const platform = process.platform;
+  const arch = process.arch;
 
   if (platform === 'win32') {
     throw new Error(
@@ -113,32 +114,90 @@ export async function installProxyApi(): Promise<void> {
     );
   }
 
-  if (!(await hasCommand('brew'))) {
-    throw new Error(
-      'Homebrew not found. CLIProxyAPI requires Homebrew for installation on macOS/Linux.\n' +
-      'Install Homebrew from https://brew.sh/ or install CLIProxyAPI manually.'
-    );
+  // Try Homebrew first (preferred)
+  if (await hasCommand('brew')) {
+    console.log('Installing CLIProxyAPI via Homebrew...');
+
+    const spawnCmd = (await import('cross-spawn')).default;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const child = spawnCmd('brew', ['install', 'cliproxyapi'], {
+          stdio: 'inherit',
+        });
+
+        child.on('close', (code: number | null) => {
+          if (code === 0) {
+            console.log('CLIProxyAPI installed successfully via Homebrew');
+            resolve();
+          } else {
+            reject(new Error('Failed to install CLIProxyAPI via Homebrew'));
+          }
+        });
+
+        child.on('error', (error: Error) => reject(error));
+      });
+      return;
+    } catch (error) {
+      debugLog('Homebrew installation failed, falling back to Go binary:', error);
+      // Fall through to Go binary installation
+    }
   }
 
-  console.log('Installing CLIProxyAPI via Homebrew...');
+  // Fallback: Install Go binary directly
+  console.log('Installing CLIProxyAPI via Go binary...');
 
-  const spawnCmd = (await import('cross-spawn')).default;
-  return new Promise<void>((resolve, reject) => {
-    const child = spawnCmd('brew', ['install', 'cliproxyapi'], {
-      stdio: 'inherit',
-    });
+  // Determine the correct binary name based on platform and architecture
+  let binaryName = 'cliproxyapi';
+  let platformSuffix = '';
 
-    child.on('close', (code: number | null) => {
-      if (code === 0) {
-        console.log('CLIProxyAPI installed successfully');
-        resolve();
-      } else {
-        reject(new Error('Failed to install CLIProxyAPI via Homebrew'));
-      }
-    });
+  if (platform === 'darwin') {
+    platformSuffix = arch === 'arm64' ? 'darwin-arm64' : 'darwin-amd64';
+  } else if (platform === 'linux') {
+    platformSuffix = arch === 'arm64' ? 'linux-arm64' : 'linux-amd64';
+  } else {
+    throw new Error(`Unsupported platform: ${platform}`);
+  }
 
-    child.on('error', (error: Error) => reject(error));
-  });
+  const binaryFileName = `cliproxyapi-${platformSuffix}`;
+  const installDir = join(process.env.HOME || '', '.local', 'bin');
+  const binaryPath = join(installDir, binaryName);
+
+  // Ensure install directory exists
+  await ensureDir(installDir);
+
+  // Download the binary
+  const releaseUrl = `https://github.com/router-for-me/CLIProxyAPI/releases/latest/download/${binaryFileName}`;
+
+  console.log(`Downloading from ${releaseUrl}...`);
+
+  try {
+    const response = await fetch(releaseUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to download: ${response.statusText}`);
+    }
+
+    const buffer = await response.arrayBuffer();
+    const uint8Array = new Uint8Array(buffer);
+
+    // Write binary to file
+    const fs = await import('fs/promises');
+    await fs.writeFile(binaryPath, uint8Array);
+
+    // Make binary executable
+    await fs.chmod(binaryPath, 0o755);
+
+    console.log(`CLIProxyAPI installed successfully to: ${binaryPath}`);
+    console.log('Make sure ~/.local/bin is in your PATH.');
+  } catch (error) {
+    throw new Error(
+      `Failed to download CLIProxyAPI binary: ${error instanceof Error ? error.message : String(error)}\n\n` +
+      'Please install CLIProxyAPI manually:\n' +
+      '  1. Visit https://github.com/router-for-me/CLIProxyAPI/releases\n' +
+      '  2. Download the appropriate binary for your platform\n' +
+      '  3. Place it in your PATH\n' +
+      '  4. Make it executable (chmod +x cliproxyapi)'
+    );
+  }
 }
 
 /**
