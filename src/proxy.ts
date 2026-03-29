@@ -102,6 +102,12 @@ export async function checkAuthConfigured(): Promise<AuthStatus> {
  * Install CLIProxyAPI via Homebrew or Go binary fallback
  */
 export async function installProxyApi(): Promise<void> {
+  const { homedir } = await import('os');
+  const home = homedir();
+  if (!home) {
+    throw new Error('Cannot determine home directory. Please set HOME environment variable.');
+  }
+
   // Check platform
   const platform = process.platform;
   const arch = process.arch;
@@ -146,21 +152,29 @@ export async function installProxyApi(): Promise<void> {
   // Fallback: Install Go binary directly
   console.log('Installing CLIProxyAPI via Go binary...');
 
-  // Determine the correct binary name based on platform and architecture
-  let binaryName = 'cliproxyapi';
-  let platformSuffix = '';
+  // Validate and determine platform suffix
+  const supportedPlatforms = ['darwin', 'linux'];
+  const supportedArches = ['arm64', 'x64'];
 
-  if (platform === 'darwin') {
-    platformSuffix = arch === 'arm64' ? 'darwin-arm64' : 'darwin-amd64';
-  } else if (platform === 'linux') {
-    platformSuffix = arch === 'arm64' ? 'linux-arm64' : 'linux-amd64';
-  } else {
-    throw new Error(`Unsupported platform: ${platform}`);
+  if (!supportedPlatforms.includes(platform)) {
+    throw new Error(
+      `Unsupported platform: ${platform}\n` +
+      `Supported platforms: ${supportedPlatforms.join(', ')}`
+    );
   }
 
+  if (!supportedArches.includes(arch)) {
+    throw new Error(
+      `Unsupported architecture: ${arch}\n` +
+      `Supported architectures: ${supportedArches.join(', ')}`
+    );
+  }
+
+  const platformSuffix = `${platform}-${arch === 'arm64' ? 'arm64' : 'amd64'}`;
   const binaryFileName = `cliproxyapi-${platformSuffix}`;
-  const installDir = join(process.env.HOME || '', '.local', 'bin');
-  const binaryPath = join(installDir, binaryName);
+  const installDir = join(home, '.local', 'bin');
+  const binaryPath = join(installDir, 'cliproxyapi');
+  const tempPath = join(installDir, `cliproxyapi.tmp.${Date.now()}`);
 
   // Ensure install directory exists
   await ensureDir(installDir);
@@ -168,34 +182,128 @@ export async function installProxyApi(): Promise<void> {
   // Download the binary
   const releaseUrl = `https://github.com/router-for-me/CLIProxyAPI/releases/latest/download/${binaryFileName}`;
 
-  console.log(`Downloading from ${releaseUrl}...`);
+  console.log(`Downloading ${binaryFileName} from GitHub releases...`);
+
+  const fs = await import('fs/promises');
 
   try {
-    const response = await fetch(releaseUrl);
+    // Download with timeout
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+
+    let response: Response;
+    try {
+      response = await fetch(releaseUrl, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+
     if (!response.ok) {
-      throw new Error(`Failed to download: ${response.statusText}`);
+      throw new Error(
+        `HTTP ${response.status} ${response.statusText}\n` +
+        `URL: ${releaseUrl}\n` +
+        `Platform/Arch: ${platformSuffix}`
+      );
     }
 
     const buffer = await response.arrayBuffer();
     const uint8Array = new Uint8Array(buffer);
 
-    // Write binary to file
-    const fs = await import('fs/promises');
-    await fs.writeFile(binaryPath, uint8Array);
+    // Atomic write: download to temp file first
+    await fs.writeFile(tempPath, uint8Array, { mode: 0o755 });
 
-    // Make binary executable
-    await fs.chmod(binaryPath, 0o755);
+    // Sync to disk
+    const fileHandle = await fs.open(tempPath, 'r');
+    try {
+      await fileHandle.sync();
+    } finally {
+      await fileHandle.close();
+    }
+
+    // Validate the binary works by running it
+    try {
+      const { spawnSync } = await import('child_process');
+      const testResult = spawnSync(tempPath, ['--version'], { timeout: 5000 });
+
+      // Fail on any error, signal termination, or non-zero exit
+      if (testResult.error || testResult.signal !== null || testResult.status !== 0) {
+        const reason = testResult.error?.message ||
+                      (testResult.signal ? `killed by signal ${testResult.signal}` : null) ||
+                      (testResult.status ? `exited with code ${testResult.status}` : 'unknown error');
+        throw new Error(`Binary validation failed: ${reason}`);
+      }
+    } catch (validationError) {
+      // Clean up invalid binary
+      await fs.unlink(tempPath).catch(() => {});
+      throw new Error(
+        `Downloaded binary failed validation: ${validationError instanceof Error ? validationError.message : String(validationError)}\n\n` +
+        'The binary may be corrupted or incompatible with your system.'
+      );
+    }
+
+    // Backup existing binary if present, but be ready to rollback
+    let backupPath: string | null = null;
+    let didBackup = false;
+    if (await fileExists(binaryPath)) {
+      backupPath = `${binaryPath}.backup.${Date.now()}`;
+      await fs.rename(binaryPath, backupPath);
+      didBackup = true;
+    }
+
+    // Move temp file to final location (atomic on most filesystems)
+    try {
+      await fs.rename(tempPath, binaryPath);
+    } catch (renameError) {
+      // Rollback: restore backup if we had one
+      if (didBackup && backupPath) {
+        try {
+          await fs.rename(backupPath, binaryPath);
+        } catch (rollbackError) {
+          debugLog('Failed to rollback after rename failure:', rollbackError);
+        }
+      }
+      throw new Error(
+        `Failed to move binary to final location: ${renameError instanceof Error ? renameError.message : String(renameError)}`
+      );
+    }
+
+    // Clean up backup on success
+    if (backupPath) {
+      fs.unlink(backupPath).catch(() => {});
+    }
 
     console.log(`CLIProxyAPI installed successfully to: ${binaryPath}`);
-    console.log('Make sure ~/.local/bin is in your PATH.');
+
+    // Check if install dir is in PATH
+    const pathEnv = process.env.PATH || '';
+    const pathDirs = pathEnv.split(':');
+    const binInPath = pathDirs.some(dir => dir === installDir);
+
+    if (!binInPath) {
+      console.log('');
+      console.log('⚠️  WARNING: ~/.local/bin is not in your PATH');
+      console.log('');
+      console.log('To use ccodex, add ~/.local/bin to your PATH:');
+      console.log('');
+      console.log('  For bash (add to ~/.bashrc):');
+      console.log('    export PATH="$HOME/.local/bin:$PATH"');
+      console.log('');
+      console.log('  For zsh (add to ~/.zshrc):');
+      console.log('    export PATH="$HOME/.local/bin:$PATH"');
+      console.log('');
+      console.log('Then reload your shell: source ~/.bashrc (or ~/.zshrc)');
+    }
   } catch (error) {
+    // Clean up temp file on error
+    fs.unlink(tempPath).catch(() => {});
+
     throw new Error(
-      `Failed to download CLIProxyAPI binary: ${error instanceof Error ? error.message : String(error)}\n\n` +
+      `Failed to install CLIProxyAPI: ${error instanceof Error ? error.message : String(error)}\n\n` +
       'Please install CLIProxyAPI manually:\n' +
       '  1. Visit https://github.com/router-for-me/CLIProxyAPI/releases\n' +
-      '  2. Download the appropriate binary for your platform\n' +
-      '  3. Place it in your PATH\n' +
-      '  4. Make it executable (chmod +x cliproxyapi)'
+      `  2. Download ${binaryFileName} for your system\n` +
+      '  3. Place it in a directory in your PATH\n' +
+      '  4. Make it executable: chmod +x cliproxyapi'
     );
   }
 }
