@@ -1,7 +1,7 @@
 import { join } from 'path';
 import { createHash } from 'crypto';
 import chalk from 'chalk';
-import { hasCommand, execCommand, httpGet, sleep, ensureDir, fileExists, safeJsonParse, debugLog } from './utils.js';
+import { hasCommand, getCommandPath, execCommand, httpGet, sleep, ensureDir, fileExists, safeJsonParse, debugLog } from './utils.js';
 import { CONFIG, getProxyUrl, getAuthDir, getLogFilePath } from './config.js';
 import type { ProxyCommand, AuthStatus } from './types.js';
 
@@ -19,24 +19,12 @@ export async function detectProxyCommand(): Promise<ProxyCommand> {
   }
 
   if (await hasCommand('cliproxyapi')) {
-    try {
-      // Use 'where' on Windows, 'which' on Unix/macOS
-      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-      const path = await execCommand(whichCmd, ['cliproxyapi']);
-      return { cmd: 'cliproxyapi', path };
-    } catch {
-      // which/where might fail, continue anyway
-      return { cmd: 'cliproxyapi', path: null };
-    }
+    const resolved = await getCommandPath('cliproxyapi');
+    return { cmd: 'cliproxyapi', path: resolved };
   }
   if (await hasCommand('cliproxy')) {
-    try {
-      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-      const path = await execCommand(whichCmd, ['cliproxy']);
-      return { cmd: 'cliproxy', path };
-    } catch {
-      return { cmd: 'cliproxy', path: null };
-    }
+    const resolved = await getCommandPath('cliproxy');
+    return { cmd: 'cliproxy', path: resolved };
   }
   return { cmd: null, path: null };
 }

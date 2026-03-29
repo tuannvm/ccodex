@@ -1,6 +1,6 @@
 import { existsSync } from 'fs';
 import { homedir, platform } from 'os';
-import { join } from 'path';
+import { join, delimiter } from 'path';
 import spawnCmd from 'cross-spawn';
 import { promisify } from 'util';
 import { exec as execCallback } from 'child_process';
@@ -61,30 +61,71 @@ export async function execCommand(cmd: string, args: string[] = [], timeoutMs = 
 }
 
 /**
- * Cross-platform command existence check
- * Uses Node.js built-in where command on Unix, falls back to PATH search on Windows
+ * Resolve executable path from PATH without spawning the command.
+ * Returns absolute/relative executable path if found, otherwise null.
+ */
+export function resolveCommandPath(cmd: string): string | null {
+  const pathEnv = process.env.PATH || '';
+  const pathDirs = pathEnv.split(delimiter).filter(Boolean);
+
+  // If cmd already has a path separator, test directly
+  if (cmd.includes('/') || cmd.includes('\\')) {
+    return existsSync(cmd) ? cmd : null;
+  }
+
+  if (process.platform === 'win32') {
+    const pathext = (process.env.PATHEXT || '.EXE;.CMD;.BAT;.COM')
+      .split(';')
+      .filter(Boolean);
+
+    const hasKnownExt = pathext.some(ext => cmd.toUpperCase().endsWith(ext.toUpperCase()));
+    const candidates = hasKnownExt ? [cmd] : [cmd, ...pathext.map(ext => `${cmd}${ext}`)];
+
+    for (const dir of pathDirs) {
+      for (const candidate of candidates) {
+        const fullPath = join(dir, candidate);
+        if (existsSync(fullPath)) {
+          return fullPath;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  for (const dir of pathDirs) {
+    const fullPath = join(dir, cmd);
+    if (existsSync(fullPath)) {
+      return fullPath;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Cross-platform command existence check using PATH resolution.
+ * Avoids spawning `<cmd> --version` (which is unreliable on Windows).
  */
 export async function hasCommand(cmd: string): Promise<boolean> {
   try {
-    const isWindows = process.platform === 'win32';
-
-    if (isWindows) {
-      // On Windows, try to spawn the command with --version only
-      // Use short timeout to avoid hangs on interactive commands
-      try {
-        await execCommand(cmd, ['--version'], 3000);
-        return true;
-      } catch {
-        return false;
-      }
-    } else {
-      // On Unix/macOS, use the which command
-      await execCommand('which', [cmd]);
-      return true;
-    }
+    return resolveCommandPath(cmd) !== null;
   } catch (error) {
     debugLog(`hasCommand failed for ${cmd}:`, error);
     return false;
+  }
+}
+
+/**
+ * Return full resolved command path from PATH if available.
+ */
+export async function getCommandPath(cmd: string): Promise<string | null> {
+  try {
+    const resolved = resolveCommandPath(cmd);
+    return resolved;
+  } catch (error) {
+    debugLog(`getCommandPath failed for ${cmd}:`, error);
+    return null;
   }
 }
 

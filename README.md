@@ -45,6 +45,41 @@ Every time you run `ccodex`, it:
 
 This makes it "just work" without manual setup steps.
 
+## Production Readiness (v0.1.8)
+
+`ccodex` v0.1.8 is production-ready for:
+- ✅ **macOS** (arm64, x64)
+- ✅ **Linux** (arm64, x64)
+
+### Windows Status (Known Limitations)
+
+Windows support is currently partial and is not yet production-ready.
+
+Current Windows limitations:
+- `CLIProxyAPI` auto-install is not fully automated; manual proxy setup is required.
+- Shell/profile integration differs across `PowerShell`, `Windows PowerShell`, and `cmd`, and may need manual adjustment.
+- Path and wrapper differences (`.cmd`/`.exe`) are handled in detection, but end-to-end setup remains less reliable than macOS/Linux.
+
+Recommended Windows flow for now:
+1. Install Claude Code CLI manually and verify `claude` is on `PATH`.
+2. Install and run proxy components manually.
+3. Use `ccodex --status` to verify runtime before interactive use.
+
+For team rollouts, treat Windows as "best effort" until full installer parity lands.
+
+### Security Features
+
+- **Allowlist environment passing**: Only essential environment variables are passed to Claude subprocess (PATH, HOME, TMP, etc.)
+- **Mandatory checksum verification**: Downloaded binaries are verified against SHA-256 checksums before installation
+- **Fail-closed policy**: Installation fails hard if checksums cannot be verified
+- **No API key leakage**: All Anthropic/OpenAI variables are explicitly excluded from subprocess environment
+
+### Known Limitations
+
+- **Checksum trust model**: Binary and checksum are both fetched from the same GitHub release. If the release account is compromised, both could be malicious. Future versions may add signature verification.
+- **Concurrency**: No install lock file; concurrent installations may race (low frequency issue).
+- **Platform support**: Only arm64 and x64 architectures are supported.
+
 ## Model Mapping
 
 | Claude Tier | GPT Model |

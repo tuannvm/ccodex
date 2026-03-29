@@ -1,7 +1,7 @@
 import spawnCmd from 'cross-spawn';
 import { join } from 'path';
 import { homedir } from 'os';
-import { hasCommand, ensureDir, getUid, fileExists } from './utils.js';
+import { hasCommand, getCommandPath, ensureDir, getUid, fileExists } from './utils.js';
 import { startProxy, checkAuthConfigured, launchLogin, waitForAuth } from './proxy.js';
 
 // Track locally installed Claude CLI path for this process
@@ -50,15 +50,8 @@ export async function detectClaudeCommand(): Promise<{ cmd: string | null; path:
 
   // 3. Check system PATH for global installation
   if (await hasCommand('claude')) {
-    try {
-      const { execCommand } = await import('./utils.js');
-      // Use 'where' on Windows, 'which' on Unix/macOS
-      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
-      const path = await execCommand(whichCmd, ['claude']);
-      return { cmd: 'claude', path };
-    } catch {
-      return { cmd: 'claude', path: null };
-    }
+    const resolved = await getCommandPath('claude');
+    return { cmd: 'claude', path: resolved };
   }
   return { cmd: null, path: null };
 }
@@ -165,51 +158,49 @@ export async function runClaude(args: string[]): Promise<void> {
   const userHome = homedir();
 
   // Environment for Claude with proxy
-  // Explicitly exclude ALL Anthropic/OpenAI variables before setting proxy config
-  // This ensures no API key fallback - authentication must happen through ChatGPT OAuth
-  const varsToUnset = [
-    'ANTHROPIC_API_KEY',
-    'CLAUDE_API_KEY',
-    'OPENAI_API_KEY',
-    'ANTHROPIC_AUTH_TOKEN',
-    'ANTHROPIC_BASE_URL',
-    'ANTHROPIC_MODEL',
-    'ANTHROPIC_DEFAULT_OPUS_MODEL',
-    'ANTHROPIC_DEFAULT_SONNET_MODEL',
-    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
-    'CLAUDE_CODE_SUBAGENT_MODEL',
-  ];
+  // Minimal allowlist for subprocess environment.
+  // Default-deny: only pass values required for process execution and terminal UX.
+  const allowedEnvKeys = new Set([
+    'PATH',
+    'HOME',
+    'USERPROFILE',
+    'SYSTEMROOT',
+    'WINDIR',
+    'COMSPEC',
+    'PATHEXT',
+    'TMPDIR',
+    'TMP',
+    'TEMP',
+    'LANG',
+    'LC_ALL',
+    'LC_CTYPE',
+    'TERM',
+    'COLORTERM',
+    'NO_COLOR',
+    'FORCE_COLOR',
+    'CI',
+    'SHELL',
+    'PWD',
+    'OLDPWD',
+    'XDG_CONFIG_HOME',
+    'XDG_CACHE_HOME',
+    'XDG_DATA_HOME',
+  ]);
 
-  // Patterns for secret environment variables to exclude
-  // This prevents other API keys/tokens from leaking into the Claude subprocess
-  const secretPatterns = [
-    /_API_KEY$/i,
-    /_APIKEY$/i,
-    /_ACCESS_KEY$/i,           // AWS_ACCESS_KEY_ID
-    /_SECRET_KEY$/i,           // AWS_SECRET_ACCESS_KEY
-    /_SESSION_TOKEN$/i,        // AWS_SESSION_TOKEN
-    /_TOKEN$/i,
-    /_SECRET$/i,
-    /_PASSWORD$/i,
-    /_PRIVATE_KEY$/i,
-    /_AUTH$/i,
-    /^GITHUB_PAT$/i,           // GitHub Personal Access Token
-    /^GITHUB_TOKEN$/i,
-    /^GITLAB_TOKEN$/i,
-    /^BITBUCKET_TOKEN$/i,
-    /^NPM_TOKEN$/i,
-    /^CI?$/i,                  // CI variable often contains secrets
-  ];
-
-  // Helper to check if a variable name looks like a secret
-  function looksLikeSecret(varName: string): boolean {
-    return secretPatterns.some(pattern => pattern.test(varName));
+  // Permit npm config without broad env leakage.
+  function isAllowedByPrefix(key: string): boolean {
+    return key.startsWith('npm_config_');
   }
 
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    // Skip if explicitly unset, undefined, or looks like a secret
-    if (!varsToUnset.includes(key) && value !== undefined && !looksLikeSecret(key)) {
+    if (value === undefined) continue;
+
+    // On Windows env keys are case-insensitive; normalize for allowlist matching.
+    const normalized = process.platform === 'win32' ? key.toUpperCase() : key;
+    const allowed = allowedEnvKeys.has(normalized) || isAllowedByPrefix(key);
+
+    if (allowed) {
       env[key] = value;
     }
   }

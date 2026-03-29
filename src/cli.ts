@@ -163,7 +163,7 @@ async function main(): Promise<void> {
   program
     .name('ccodex')
     .description('TypeScript reimplementation of ccodex - run Claude Code with OpenAI GPT models')
-    .version('0.1.7')
+    .version('0.1.8')
     .option('--login', 'Run ChatGPT/Codex OAuth login')
     .option('--status', 'Show setup status')
     .option('--diagnose', 'Show proxy and auth diagnostics')
