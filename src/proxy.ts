@@ -1077,8 +1077,8 @@ api-keys:
 
 auth-dir: ${authDir}
 
-log:
-  level: info
+debug: false
+logging-to-file: false
 `,
         "utf-8"
       );
@@ -1097,7 +1097,10 @@ log:
       const needsAuthDirRepair = configuredAuthDir.length === 0 || !isAbsolute(configuredAuthDir);
       const needsApiKeysRepair = !apiKeysLine;
 
-      if (needsAuthDirRepair || legacyAuthDirLine || needsApiKeysRepair) {
+      // Check for invalid log.level field (CLIProxyAPI uses debug: false, not log.level)
+      const hasInvalidLogLevel = /^\s*log\s*:\s*\n\s*level\s*:/m.test(configRaw);
+
+      if (needsAuthDirRepair || legacyAuthDirLine || needsApiKeysRepair || hasInvalidLogLevel) {
         let repairedConfig = configRaw;
 
         // Remove legacy auth_dir line if present
@@ -1113,7 +1116,7 @@ log:
           if (portLineMatch) {
             repairedConfig = repairedConfig.replace(
               /^(\s*port\s*:\s*\d+\s*)$/m,
-              `$1\n\napi-keys:\n  - "ccodex-local"`
+              `$1\n\napi-keys:\n  - "sk-dummy"`
             );
           } else {
             // Insert at the beginning after host line
@@ -1121,13 +1124,24 @@ log:
             if (hostLineMatch) {
               repairedConfig = repairedConfig.replace(
                 /^(\s*host\s*:.*)$/m,
-                `$1\n\napi-keys:\n  - "ccodex-local"`
+                `$1\n\napi-keys:\n  - "sk-dummy"`
               );
             } else {
-              repairedConfig = `api-keys:\n  - "ccodex-local"\n\n${repairedConfig}`;
+              repairedConfig = `api-keys:\n  - "sk-dummy"\n\n${repairedConfig}`;
             }
           }
           debugLog(`Added api-keys to config: ${configPath}`);
+        }
+
+        // Repair invalid log.level field (replace with debug: false)
+        if (hasInvalidLogLevel) {
+          // Remove the entire log: block with level:
+          repairedConfig = repairedConfig.replace(/^\s*log\s*:\s*\n\s*level\s*:\s*\w+\s*\n?/m, "");
+          // Add debug: false and logging-to-file: false if not already present
+          if (!/^\s*debug\s*:/m.test(repairedConfig)) {
+            repairedConfig = `${repairedConfig.trimEnd()}\ndebug: false\nlogging-to-file: false\n`;
+          }
+          debugLog(`Repaired invalid log.level field in config: ${configPath}`);
         }
 
         // Update or add auth-dir line
@@ -1140,6 +1154,30 @@ log:
 
         await fs.writeFile(configPath, repairedConfig, "utf-8");
         debugLog(`Repaired config: ${configPath}`);
+      }
+    }
+
+    // Also update merged-config.yaml if it exists (for VibeProxy users)
+    // This ensures compatibility with users who have VibeProxy installed
+    const mergedConfigPath = join(authDir, "merged-config.yaml");
+    if (await fileExists(mergedConfigPath)) {
+      const mergedRaw = await fs.readFile(mergedConfigPath, "utf-8");
+      const hasApiKeys = /^\s*api-keys\s*:/m.test(mergedRaw);
+
+      if (!hasApiKeys) {
+        let repairedMerged = mergedRaw;
+        // Insert api-keys after auth-dir line or at the beginning
+        const authDirMatch = /^(\s*auth-dir\s*:.*)$/m.exec(repairedMerged);
+        if (authDirMatch) {
+          repairedMerged = repairedMerged.replace(
+            /^(\s*auth-dir\s*:.*)$/m,
+            `$1\n\napi-keys:\n  - "sk-dummy"`
+          );
+        } else {
+          repairedMerged = `${repairedMerged.trimEnd()}\n\napi-keys:\n  - "sk-dummy"\n`;
+        }
+        await fs.writeFile(mergedConfigPath, repairedMerged, "utf-8");
+        debugLog(`Added api-keys to merged-config.yaml for VibeProxy compatibility`);
       }
     }
 
