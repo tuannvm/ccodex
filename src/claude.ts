@@ -187,18 +187,13 @@ export async function runClaude(args: string[]): Promise<void> {
     'XDG_DATA_HOME',
   ]);
 
-  // Permit npm config without broad env leakage.
-  function isAllowedByPrefix(key: string): boolean {
-    return key.startsWith('npm_config_');
-  }
-
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
 
     // On Windows env keys are case-insensitive; normalize for allowlist matching.
     const normalized = process.platform === 'win32' ? key.toUpperCase() : key;
-    const allowed = allowedEnvKeys.has(normalized) || isAllowedByPrefix(key);
+    const allowed = allowedEnvKeys.has(normalized);
 
     if (allowed) {
       env[key] = value;
