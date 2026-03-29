@@ -1,0 +1,57 @@
+# ccodex Linux Verification Container
+# Purpose: Verify ccodex works on Linux (for users who use Linux)
+# This is NOT for containerized deployment - just Linux compatibility testing
+
+FROM node:20-bookworm-slim
+
+LABEL maintainer="ccodex test"
+LABEL description="Linux compatibility test for ccodex CLI"
+
+# Install required packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user for security
+RUN useradd -m -s /bin/bash testuser
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package.json ./
+COPY tsconfig.json ./
+
+# Install dependencies
+RUN npm install
+
+# Copy source code
+COPY src/ ./src/
+
+# Build TypeScript
+RUN npm run build
+
+# Remove dev dependencies
+RUN npm prune --production
+
+# Set up test user environment
+RUN mkdir -p /home/testuser/.local/bin \
+    && mkdir -p /home/testuser/.config/ccodex \
+    && mkdir -p /home/testuser/.cache \
+    && chown -R testuser:testuser /home/testuser \
+    && chown -R testuser:testuser /app
+
+# Switch to non-root user
+USER testuser
+ENV HOME=/home/testuser
+ENV PATH="/home/testuser/.local/bin:${PATH}"
+ENV NODE_ENV=test
+
+# Run basic ccodex tests in-container
+# This verifies ccodex works on Linux for Linux users
+CMD node /app/dist/cli.js --version && \
+    node /app/dist/cli.js --status && \
+    node /app/dist/cli.js --help | head -5 && \
+    echo "✓ Linux compatibility verified"

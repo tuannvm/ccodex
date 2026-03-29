@@ -1,0 +1,120 @@
+name: Container Test
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+env:
+  FORCE_COLOR: 1
+
+jobs:
+  # Test building from source in container
+  build-test:
+    name: Build & Test (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+
+    container:
+      image: node:${{ matrix.node }}-bookworm-slim
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Environment info
+        run: |
+          echo "### Environment 🖥️" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "OS: $(cat /etc/os-release | grep PRETTY_NAME)" >> $GITHUB_STEP_SUMMARY
+          echo "Node: $(node --version)" >> $GITHUB_STEP_SUMMARY
+          echo "npm: $(npm --version)" >> $GITHUB_STEP_SUMMARY
+          echo "Arch: $(uname -m)" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build
+
+      - name: Test --version
+        run: |
+          VERSION=$(node dist/cli.js --version)
+          echo "✓ Version: $VERSION"
+          echo "### Version ✅" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "$VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Test --help
+        run: |
+          node dist/cli.js --help | tee help.txt
+          if grep -q "Usage:" help.txt; then
+            echo "✓ Help output valid"
+          else
+            echo "✗ Help output invalid"
+            exit 1
+          fi
+
+      - name: Test --status
+        run: |
+          node dist/cli.js --status | tee status.txt
+          echo "✓ Status command executed"
+
+      - name: Test --diagnose
+        run: |
+          node dist/cli.js --diagnose | tee diagnose.txt
+          echo "✓ Diagnose command executed"
+
+  # Test published npm package
+  published-test:
+    name: Published Package Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Environment info
+        run: |
+          echo "OS: $(cat /etc/os-release | grep PRETTY_NAME)"
+          echo "Node: $(node --version)"
+          echo "npm: $(npm --version)"
+
+      - name: Test npx --version
+        run: |
+          VERSION=$(npx -y @tuannvm/ccodex --version)
+          echo "✓ Published version: $VERSION"
+
+      - name: Test npx --status
+        run: |
+          npx -y @tuannvm/ccodex --status
+          echo "✓ Status from published package"
+
+      - name: Test npx --diagnose
+        run: |
+          npx -y @tuannvm/ccodex --diagnose
+          echo "✓ Diagnose from published package"
+
+  # Test on Alpine Linux
+  alpine-test:
+    name: Alpine Linux Test
+    runs-on: ubuntu-latest
+
+    container:
+      image: node:20-alpine
+
+    steps:
+      - name: Environment info
+        run: |
+          echo "OS: $(cat /etc/os-release | grep PRETTY_NAME)"
+          echo "Node: $(node --version)"
+
+      - name: Test npx on Alpine
+        run: |
+          npx -y @tuannvm/ccodex --version
+          npx -y @tuannvm/ccodex --status
+          echo "✓ Tests passed on Alpine"

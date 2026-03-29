@@ -1,0 +1,29 @@
+# Build artifacts
+dist/
+node_modules/
+*.tgz
+
+# Test files
+# Exclude container-test/ except for test script needed by Dockerfile.test
+container-test/*
+!container-test/run-container-tests.sh
+.git/
+.claude/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Debug and logs
+*.log
+npm-debug.log*
+
+# Test artifacts
+coverage/
+.nyc_output/
