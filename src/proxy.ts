@@ -148,6 +148,38 @@ export async function isProxyRunning(): Promise<boolean> {
 }
 
 /**
+ * Check if the running proxy accepts our sk-dummy api key.
+ * Returns false if the proxy is running but was started without our config
+ * (e.g. a stale process started before ccodex configured it).
+ */
+async function isProxyCompatible(): Promise<boolean> {
+  try {
+    const proxyUrl = getProxyUrl();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(`${proxyUrl}/v1/models`, {
+        headers: { Authorization: "Bearer sk-dummy" },
+        signal: controller.signal,
+      });
+      // 200 = authenticated and has models, 401 = wrong upstream creds but key accepted
+      // We treat both as compatible — the key is accepted by the proxy
+      const body = await response.text();
+      if (response.status === 401) {
+        // Distinguish "Invalid API key" (proxy rejects our key) from upstream 401
+        const isKeyRejected = body.includes("Invalid API key") || body.includes("Missing API key");
+        return !isKeyRejected;
+      }
+      return response.status === 200;
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check auth configuration
  */
 export async function checkAuthConfigured(): Promise<AuthStatus> {
@@ -1022,7 +1054,21 @@ export async function installProxyApi(): Promise<void> {
  */
 export async function startProxy(): Promise<void> {
   if (await isProxyRunning()) {
-    return;
+    // Proxy is up — verify it accepts our sk-dummy key.
+    // A stale proxy started without our config will reject it.
+    if (!(await isProxyCompatible())) {
+      console.log("Restarting CLIProxyAPI (incompatible config, killing stale process)...");
+      try {
+        const { execSync } = await import("child_process");
+        execSync("pkill -f 'cli-proxy-api|CLIProxyAPI|cliproxyapi'", { stdio: "ignore" });
+      } catch {
+        // pkill returns non-zero if no process found — ignore
+      }
+      // Wait for port to free up
+      await sleep(1500);
+    } else {
+      return;
+    }
   }
 
   const proxyExe = await requireTrustedProxyCommand();
