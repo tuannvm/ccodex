@@ -298,6 +298,7 @@ export async function installProxyApi(): Promise<void> {
 
     // Try to download and verify checksums file
     let checksumVerified = false;
+    let checksumMismatchError: Error | null = null;
     const checksumUrls = [
       `${baseUrl}/SHA256SUMS`,
       `${baseUrl}/checksums.txt`,
@@ -319,21 +320,34 @@ export async function installProxyApi(): Promise<void> {
               checksumVerified = true;
               break;
             } else {
+              // Checksum mismatch - this is FATAL, do not continue
               await fs.unlink(tempPath).catch(() => {});
-              throw new Error(
+              checksumMismatchError = new Error(
                 `Checksum verification failed!\n` +
                 `Expected: ${expectedHash}\n` +
                 `Actual:   ${actualHash}\n\n` +
                 `The downloaded binary may be corrupted or tampered with.\n` +
                 `Please try again or install CLIProxyAPI manually.`
               );
+              break; // Exit loop immediately on mismatch
             }
           }
         }
       } catch (checksumError) {
+        // Only catch network/parsing errors - let checksum mismatches fail hard
+        const errorMsg = checksumError instanceof Error ? checksumError.message : String(checksumError);
+        if (errorMsg.includes('Checksum verification failed')) {
+          // Re-throw checksum mismatch errors
+          throw checksumError;
+        }
         debugLog(`Checksum verification failed for ${checksumUrl}:`, checksumError);
-        // Try next checksum URL
+        // Try next checksum URL on network errors
       }
+    }
+
+    // If we found a checksum mismatch, fail hard
+    if (checksumMismatchError) {
+      throw checksumMismatchError;
     }
 
     if (!checksumVerified) {

@@ -11,9 +11,20 @@ let installedClaudePath: string | null = null;
  * Get the deterministic persistent path for local Claude CLI installation
  * This path is used across process invocations to persistently discover
  * locally-installed Claude CLI when global install fails
+ * Handles platform differences (Unix vs Windows)
  */
 function getPersistentLocalClaudePath(): string {
-  return join(homedir(), '.local', 'ccodex', 'npm', 'node_modules', '.bin', 'claude');
+  const home = homedir();
+
+  if (process.platform === 'win32') {
+    // Windows: npm installs to AppData/local/prefix, with .cmd wrappers
+    // Try claude.cmd first (npm wrapper), then claude.exe (actual binary)
+    const localPrefix = join(home, 'AppData', 'Local', 'ccodex', 'npm');
+    return join(localPrefix, 'node_modules', '.bin', 'claude.cmd');
+  }
+
+  // Unix/macOS: ~/.local/ccodex/npm/node_modules/.bin/claude
+  return join(home, '.local', 'ccodex', 'npm', 'node_modules', '.bin', 'claude');
 }
 
 /**
@@ -41,7 +52,9 @@ export async function detectClaudeCommand(): Promise<{ cmd: string | null; path:
   if (await hasCommand('claude')) {
     try {
       const { execCommand } = await import('./utils.js');
-      const path = await execCommand('which', ['claude']);
+      // Use 'where' on Windows, 'which' on Unix/macOS
+      const whichCmd = process.platform === 'win32' ? 'where' : 'which';
+      const path = await execCommand(whichCmd, ['claude']);
       return { cmd: 'claude', path };
     } catch {
       return { cmd: 'claude', path: null };
@@ -93,7 +106,13 @@ export async function installClaudeCode(): Promise<void> {
   }
 
   // Fallback to local install
-  const localPrefix = join(homedir(), '.local', 'ccodex', 'npm');
+  // Use platform-specific local prefix path
+  let localPrefix: string;
+  if (process.platform === 'win32') {
+    localPrefix = join(homedir(), 'AppData', 'Local', 'ccodex', 'npm');
+  } else {
+    localPrefix = join(homedir(), '.local', 'ccodex', 'npm');
+  }
   console.log(`Global install denied. Falling back to local prefix: ${localPrefix}`);
 
   const local = await runNpmInstall(['install', '--prefix', localPrefix, '@anthropic-ai/claude-code']);
@@ -161,9 +180,27 @@ export async function runClaude(args: string[]): Promise<void> {
     'CLAUDE_CODE_SUBAGENT_MODEL',
   ];
 
+  // Patterns for secret environment variables to exclude
+  // This prevents other API keys/tokens from leaking into the Claude subprocess
+  const secretPatterns = [
+    /_API_KEY$/i,
+    /_APIKEY$/i,
+    /_TOKEN$/i,
+    /_SECRET$/i,
+    /_PASSWORD$/i,
+    /_PRIVATE_KEY$/i,
+    /_AUTH$/i,
+  ];
+
+  // Helper to check if a variable name looks like a secret
+  function looksLikeSecret(varName: string): boolean {
+    return secretPatterns.some(pattern => pattern.test(varName));
+  }
+
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (!varsToUnset.includes(key) && value !== undefined) {
+    // Skip if explicitly unset, undefined, or looks like a secret
+    if (!varsToUnset.includes(key) && value !== undefined && !looksLikeSecret(key)) {
       env[key] = value;
     }
   }
