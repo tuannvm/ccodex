@@ -1059,7 +1059,10 @@ export async function startProxy(): Promise<void> {
     await ensureDir(configDir);
     const configPath = join(configDir, "config.yaml");
 
-    // Create default config if it doesn't exist
+    // Use the same auth directory as the rest of ccodex
+    const authDir = getAuthDir();
+
+    // Create or repair config to ensure auth_dir is always valid
     if (!(await fileExists(configPath))) {
       await fs.writeFile(
         configPath,
@@ -1070,7 +1073,7 @@ server:
   host: 127.0.0.1
   port: 8317
 
-auth_dir: ${join(home, ".config", "ccodex", "auth")}
+auth-dir: ${authDir}
 
 log:
   level: info
@@ -1078,17 +1081,55 @@ log:
         "utf-8"
       );
       debugLog(`Created default config: ${configPath}`);
+    } else {
+      // Repair existing config if auth-dir is missing or invalid
+      // Also migrate legacy auth_dir (underscore) to auth-dir (hyphen)
+      const configRaw = await fs.readFile(configPath, "utf-8");
+
+      // Check for both auth-dir (correct) and auth_dir (legacy/incorrect)
+      const authDirLine = /^(\s*auth-dir\s*:\s*)(.*)$/m.exec(configRaw);
+      const legacyAuthDirLine = /^(\s*auth_dir\s*:\s*)(.*)$/m.exec(configRaw);
+      const configuredAuthDir = authDirLine?.[2]?.trim().replace(/^['"]|['"]$/g, "") ?? "";
+      const { isAbsolute } = await import("path");
+      const needsAuthDirRepair = configuredAuthDir.length === 0 || !isAbsolute(configuredAuthDir);
+
+      if (needsAuthDirRepair || legacyAuthDirLine) {
+        let repairedConfig = configRaw;
+
+        // Remove legacy auth_dir line if present
+        if (legacyAuthDirLine) {
+          repairedConfig = repairedConfig.replace(/^(\s*auth_dir\s*:\s*).*$/m, "");
+          debugLog(`Removed legacy auth_dir key from config: ${configPath}`);
+        }
+
+        // Update or add auth-dir line
+        const existingAuthDirLine = /^(\s*auth-dir\s*:\s*)(.*)$/m.exec(repairedConfig);
+        if (existingAuthDirLine) {
+          repairedConfig = repairedConfig.replace(/^(\s*auth-dir\s*:\s*).*$/m, `$1${authDir}`);
+        } else {
+          repairedConfig = `${repairedConfig.trimEnd()}\nauth-dir: ${authDir}\n`;
+        }
+
+        await fs.writeFile(configPath, repairedConfig, "utf-8");
+        debugLog(`Repaired auth-dir in config: ${configPath}`);
+      }
     }
 
-    // Ensure auth directory exists
-    const authDir = join(home, ".config", "ccodex", "auth");
+    // Ensure auth directory exists before spawning CLIProxyAPI
     await ensureDir(authDir);
 
     // Pass config path via -config flag to CLIProxyAPI
+    // Include explicit PATH for container environments where it may be missing
+    const childEnv = {
+      ...process.env,
+      HOME: home,
+      PATH: process.env.PATH || "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    };
+
     const child = spawn(proxyExe, ["-config", configPath], {
       detached: true,
       stdio: ["ignore", out.fd, out.fd],
-      env: { ...process.env, HOME: home }, // Pass environment so mkdir and other commands work
+      env: childEnv,
     });
 
     // Handle spawn errors immediately (fail-fast)
