@@ -1072,6 +1072,9 @@ export async function startProxy(): Promise<void> {
 host: 127.0.0.1
 port: 8317
 
+api-keys:
+  - "sk-dummy"
+
 auth-dir: ${authDir}
 
 log:
@@ -1081,24 +1084,50 @@ log:
       );
       debugLog(`Created default config: ${configPath}`);
     } else {
-      // Repair existing config if auth-dir is missing or invalid
+      // Repair existing config if auth-dir or api-keys is missing
       // Also migrate legacy auth_dir (underscore) to auth-dir (hyphen)
       const configRaw = await fs.readFile(configPath, "utf-8");
 
       // Check for both auth-dir (correct) and auth_dir (legacy/incorrect)
       const authDirLine = /^(\s*auth-dir\s*:\s*)(.*)$/m.exec(configRaw);
       const legacyAuthDirLine = /^(\s*auth_dir\s*:\s*)(.*)$/m.exec(configRaw);
+      const apiKeysLine = /^\s*api-keys\s*:/m.exec(configRaw);
       const configuredAuthDir = authDirLine?.[2]?.trim().replace(/^['"]|['"]$/g, "") ?? "";
       const { isAbsolute } = await import("path");
       const needsAuthDirRepair = configuredAuthDir.length === 0 || !isAbsolute(configuredAuthDir);
+      const needsApiKeysRepair = !apiKeysLine;
 
-      if (needsAuthDirRepair || legacyAuthDirLine) {
+      if (needsAuthDirRepair || legacyAuthDirLine || needsApiKeysRepair) {
         let repairedConfig = configRaw;
 
         // Remove legacy auth_dir line if present
         if (legacyAuthDirLine) {
           repairedConfig = repairedConfig.replace(/^(\s*auth_dir\s*:\s*).*$/m, "");
           debugLog(`Removed legacy auth_dir key from config: ${configPath}`);
+        }
+
+        // Add api-keys if missing
+        if (needsApiKeysRepair) {
+          // Insert api-keys after port line or at the top if port not found
+          const portLineMatch = /^(\s*port\s*:\s*\d+\s*)$/m.exec(repairedConfig);
+          if (portLineMatch) {
+            repairedConfig = repairedConfig.replace(
+              /^(\s*port\s*:\s*\d+\s*)$/m,
+              `$1\n\napi-keys:\n  - "ccodex-local"`
+            );
+          } else {
+            // Insert at the beginning after host line
+            const hostLineMatch = /^(\s*host\s*:.*)$/m.exec(repairedConfig);
+            if (hostLineMatch) {
+              repairedConfig = repairedConfig.replace(
+                /^(\s*host\s*:.*)$/m,
+                `$1\n\napi-keys:\n  - "ccodex-local"`
+              );
+            } else {
+              repairedConfig = `api-keys:\n  - "ccodex-local"\n\n${repairedConfig}`;
+            }
+          }
+          debugLog(`Added api-keys to config: ${configPath}`);
         }
 
         // Update or add auth-dir line
@@ -1110,7 +1139,7 @@ log:
         }
 
         await fs.writeFile(configPath, repairedConfig, "utf-8");
-        debugLog(`Repaired auth-dir in config: ${configPath}`);
+        debugLog(`Repaired config: ${configPath}`);
       }
     }
 
