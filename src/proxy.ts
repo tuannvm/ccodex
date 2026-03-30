@@ -100,7 +100,7 @@ export async function requireTrustedProxyCommand(): Promise<string> {
     throw new Error(
       "CLIProxyAPI not found. Install it first:\n" +
         "  1. Run: npx -y @tuannvm/ccodex\n" +
-        "  2. Or install manually: brew install cli-proxy-api"
+        "  2. Or install manually: brew install cliproxyapi"
     );
   }
 
@@ -111,7 +111,7 @@ export async function requireTrustedProxyCommand(): Promise<string> {
 /**
  * Detect CLIProxyAPI command
  * Prefers locally installed binary from this process if available
- * Supports multiple binary names: cli-proxy-api (new), CLIProxyAPI (old), cliproxy
+ * Supports multiple binary names: cli-proxy-api (new), CLIProxyAPI (old), cliproxy, cliproxyapi (Homebrew)
  */
 export async function detectProxyCommand(): Promise<ProxyCommand> {
   // Prefer locally installed binary from this process
@@ -120,10 +120,11 @@ export async function detectProxyCommand(): Promise<ProxyCommand> {
   }
 
   // Try new name first, then legacy names
-  const commandNames: ("cli-proxy-api" | "CLIProxyAPI" | "cliproxy")[] = [
+  const commandNames: ("cli-proxy-api" | "CLIProxyAPI" | "cliproxy" | "cliproxyapi")[] = [
     "cli-proxy-api",
     "CLIProxyAPI",
     "cliproxy",
+    "cliproxyapi",
   ];
   for (const name of commandNames) {
     if (await hasCommand(name)) {
@@ -593,7 +594,7 @@ export async function installProxyApi(): Promise<void> {
       const spawnCmd = (await import("cross-spawn")).default;
       try {
         await new Promise<void>((resolve, reject) => {
-          const child = spawnCmd(brewPath, ["install", "cli-proxy-api"], {
+          const child = spawnCmd(brewPath, ["install", "cliproxyapi"], {
             stdio: "inherit",
           });
 
@@ -696,7 +697,7 @@ export async function installProxyApi(): Promise<void> {
               `  - ${cliPlatform}_${cliArch} archives are not available in release ${releaseTag}\n` +
               `  - Check the CLIProxyAPI releases page for available platforms\n\n` +
               `Suggested alternatives:\n` +
-              `  1. Try Homebrew installation: brew install cli-proxy-api\n` +
+              `  1. Try Homebrew installation: brew install cliproxyapi\n` +
               `  2. Check available releases: ${baseUrl}\n` +
               `  3. Download manually from: https://github.com/router-for-me/CLIProxyAPI/releases\n\n` +
               `Available platforms for CLIProxyAPI may vary by release.`
@@ -891,12 +892,12 @@ export async function installProxyApi(): Promise<void> {
       }
 
       // Find the extracted binary
-      // CLIProxyAPI archives contain a binary named 'cli-proxy-api' (new) or 'CLIProxyAPI' (old)
+      // CLIProxyAPI archives contain a binary named 'cli-proxy-api' (new), 'CLIProxyAPI' (old), or 'cliproxyapi' (Homebrew tap)
       // On Windows it may have .exe extension
       const extractedFiles = await fs.readdir(extractDir);
       const binaryNames = isWindows
-        ? ["cli-proxy-api.exe", "CLIProxyAPI.exe"]
-        : ["cli-proxy-api", "CLIProxyAPI"];
+        ? ["cli-proxy-api.exe", "CLIProxyAPI.exe", "cliproxyapi.exe"]
+        : ["cli-proxy-api", "CLIProxyAPI", "cliproxyapi"];
       const extractedBinary = extractedFiles.find((f) => binaryNames.includes(f));
 
       if (!extractedBinary) {
