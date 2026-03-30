@@ -1,6 +1,7 @@
 import { join, delimiter, normalize, sep, resolve, dirname, isAbsolute } from "path";
 import { homedir } from "os";
 import { createHash, randomUUID } from "crypto";
+import { spawnSync } from "child_process";
 import chalk from "chalk";
 import {
   hasCommand,
@@ -164,11 +165,27 @@ async function isProxyCompatible(): Promise<boolean> {
       });
       // 200 = authenticated and has models, 401 = wrong upstream creds but key accepted
       // We treat both as compatible — the key is accepted by the proxy
-      const body = await response.text();
       if (response.status === 401) {
-        // Distinguish "Invalid API key" (proxy rejects our key) from upstream 401
-        const isKeyRejected = body.includes("Invalid API key") || body.includes("Missing API key");
-        return !isKeyRejected;
+        // Distinguish "proxy rejects our sk-dummy key" from "upstream credential 401".
+        // Parse JSON error code/type — more robust than string matching message text.
+        const body = await response.text();
+        try {
+          const json = JSON.parse(body) as {
+            error?: { code?: string; type?: string; message?: string };
+          };
+          const code = json.error?.code ?? "";
+          const type = json.error?.type ?? "";
+          const msg = json.error?.message ?? "";
+          const isKeyRejected =
+            code === "invalid_api_key" ||
+            code === "missing_api_key" ||
+            msg.toLowerCase().includes("api key");
+          void type; // type field alone is too broad to classify key rejection
+          return !isKeyRejected;
+        } catch {
+          // Non-JSON 401 — treat as key rejected (fail-safe: don't reuse broken proxy)
+          return false;
+        }
       }
       return response.status === 200;
     } finally {
@@ -200,7 +217,7 @@ export async function checkAuthConfigured(): Promise<AuthStatus> {
   let hasAuthEntries = false;
   try {
     const proxyExe = await requireTrustedProxyCommand();
-    const output = await execCommand(proxyExe, ["status"]);
+    const output = await execCommand(proxyExe, ["status"], 5000);
     // Match "N auth entries" or "N auth files" where N > 0
     const match = output.match(/(\d+)\s+(auth entries|auth files)/);
     if (match) {
@@ -1050,6 +1067,37 @@ export async function installProxyApi(): Promise<void> {
 }
 
 /**
+ * Kill any running CLIProxyAPI process (cross-platform).
+ * On Unix: tries pkill, then falls back to lsof-based port kill.
+ * On Windows: uses taskkill.
+ * Swallows errors — it's fine if no process is found.
+ */
+async function killProxy(): Promise<void> {
+  const { execSync } = await import("child_process");
+  if (process.platform === "win32") {
+    try {
+      execSync("taskkill /F /IM cli-proxy-api.exe /T", { stdio: "ignore" });
+    } catch {
+      // No matching process — ignore
+    }
+    return;
+  }
+  // Unix: try pkill by name, then always run lsof port-kill as a secondary guard.
+  // The lsof pass catches any process holding the port even if pkill missed it
+  // (e.g., pkill not installed on minimal systems, or process renamed).
+  try {
+    execSync("pkill -f 'cli-proxy-api|CLIProxyAPI|cliproxyapi'", { stdio: "ignore" });
+  } catch {
+    // pkill not found (ENOENT) or no matching process (exit 1) — both are ignorable
+  }
+  try {
+    execSync(`lsof -ti :${CONFIG.PROXY_PORT} | xargs kill -9`, { stdio: "ignore", shell: "/bin/sh" });
+  } catch {
+    // lsof not found or no process on port — ignore
+  }
+}
+
+/**
  * Start proxy in background
  */
 export async function startProxy(): Promise<void> {
@@ -1058,12 +1106,7 @@ export async function startProxy(): Promise<void> {
     // A stale proxy started without our config will reject it.
     if (!(await isProxyCompatible())) {
       console.log("Restarting CLIProxyAPI (incompatible config, killing stale process)...");
-      try {
-        const { execSync } = await import("child_process");
-        execSync("pkill -f 'cli-proxy-api|CLIProxyAPI|cliproxyapi'", { stdio: "ignore" });
-      } catch {
-        // pkill returns non-zero if no process found — ignore
-      }
+      await killProxy();
       // Wait for port to free up
       await sleep(1500);
     } else {
@@ -1314,28 +1357,130 @@ log:
     });
 
     let output = "";
+    let oauthUrl: string | null = null;
+    let keypressCleanup: (() => void) | null = null;
+    // Carry buffer for incomplete lines spanning chunk boundaries
+    let lineBuffer = "";
+
+    const setupCopyPrompt = (url: string): void => {
+      if (oauthUrl) return; // already set up
+      oauthUrl = url;
+      console.log(`\nBrowser didn't open? Use the url below to sign in (c to copy)\n  ${url}\n`);
+
+      // Listen for 'c' keypress to copy URL to clipboard
+      if (process.stdin.isTTY) {
+        let rawModeEnabled = false;
+        try {
+          process.stdin.setRawMode(true);
+          rawModeEnabled = true;
+          process.stdin.resume();
+          process.stdin.setEncoding("utf8");
+
+          const onKey = (key: string): void => {
+            if (key === "c" || key === "C") {
+              copyToClipboard(url);
+              console.log("  Copied!");
+            } else if (key === "\u0003") {
+              // Ctrl+C — let it propagate
+              process.kill(process.pid, "SIGINT");
+            }
+          };
+
+          process.stdin.on("data", onKey);
+          keypressCleanup = (): void => {
+            process.stdin.off("data", onKey);
+            try {
+              if (process.stdin.isTTY) {
+                process.stdin.setRawMode(false);
+                process.stdin.pause();
+              }
+            } catch {
+              // ignore cleanup errors
+            }
+          };
+        } catch {
+          // setRawMode failed — restore if it was partially set
+          if (rawModeEnabled) {
+            try { process.stdin.setRawMode(false); } catch { /* ignore */ }
+          }
+          // Copy prompt still shown on screen, keypress just won't work
+        }
+      }
+    };
+
+    const processLine = (line: string): void => {
+      // Match any https URL (broad: covers any OAuth provider)
+      const urlMatch = line.match(/https?:\/\/\S+/);
+      if (urlMatch && !oauthUrl) {
+        setupCopyPrompt(urlMatch[0]);
+      } else {
+        process.stdout.write(line + "\n");
+      }
+    };
+
     child.stdout?.on("data", (data: Buffer) => {
       const text = data.toString();
       output += text;
-      // Print to console so user sees progress
-      process.stdout.write(text);
+      // Buffer incomplete lines across chunks to handle URLs that span chunk boundaries
+      const combined = lineBuffer + text;
+      const lines = combined.split("\n");
+      // Last element is either empty (text ended with \n) or an incomplete line fragment
+      lineBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        processLine(line);
+      }
     });
 
     child.on("close", (code: number | null) => {
+      // Flush any remaining buffered line
+      if (lineBuffer) processLine(lineBuffer);
+      keypressCleanup?.();
       if (code === 0) {
         resolve();
       } else {
-        // Check if output contains an OAuth URL that wasn't visited
+        // Surface the URL if login failed without a browser visit
         const urlMatch = output.match(/https?:\/\/[^\s\n]+/);
-        if (urlMatch) {
+        if (urlMatch && !oauthUrl) {
           console.log(`\n🔐 Visit this URL to complete login:\n   ${urlMatch[0]}`);
         }
         reject(new Error(`Login failed with code ${code}`));
       }
     });
 
-    child.on("error", (error: Error) => reject(error));
+    child.on("error", (error: Error) => {
+      keypressCleanup?.();
+      reject(error);
+    });
   });
+}
+
+/**
+ * Copy text to clipboard (cross-platform).
+ * Uses spawnSync so it can be called synchronously from a keypress handler.
+ */
+function copyToClipboard(text: string): void {
+  const input = Buffer.from(text);
+  try {
+    if (process.platform === "darwin") {
+      spawnSync("pbcopy", [], { input, stdio: ["pipe", "ignore", "ignore"] });
+    } else if (process.platform === "win32") {
+      spawnSync("clip", [], { input, stdio: ["pipe", "ignore", "ignore"] });
+    } else {
+      // Linux: try xclip, fall back to xsel
+      const r = spawnSync("xclip", ["-selection", "clipboard"], {
+        input,
+        stdio: ["pipe", "ignore", "ignore"],
+      });
+      if (r.error || r.status !== 0) {
+        spawnSync("xsel", ["--clipboard", "--input"], {
+          input,
+          stdio: ["pipe", "ignore", "ignore"],
+        });
+      }
+    }
+  } catch {
+    // Clipboard not available — silently ignore, user still has the URL on screen
+  }
 }
 
 /**
@@ -1343,6 +1488,12 @@ log:
  */
 export async function waitForAuth(): Promise<void> {
   console.log("Waiting for authentication...");
+
+  // Restart proxy so it picks up the newly-written credentials.
+  // The running proxy was started before login and has no knowledge of new creds.
+  await killProxy();
+  await sleep(CONFIG.PROXY_KILL_WAIT_MS);
+  await startProxy(); // waits until proxy is accepting connections
 
   for (let i = 0; i < CONFIG.AUTH_WAIT_MAX_RETRIES; i++) {
     await sleep(CONFIG.AUTH_WAIT_RETRY_DELAY_MS);

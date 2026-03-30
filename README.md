@@ -45,9 +45,20 @@ Every time you run `ccodex`, it:
 
 This makes it "just work" without manual setup steps.
 
-## Production Readiness (v0.2.6)
+### OAuth Login UX
 
-`ccodex` v0.2.6 is production-ready for:
+When login is required, `ccodex` launches the OAuth flow and shows:
+
+```
+Browser didn't open? Use the url below to sign in (c to copy)
+  https://auth.openai.com/oauth/authorize?...
+```
+
+Press **`c`** to copy the URL to your clipboard. After completing login in the browser, the proxy restarts automatically and Claude Code launches.
+
+## Production Readiness (v0.4.10)
+
+`ccodex` v0.4.10 is production-ready for:
 - ✅ **macOS** (arm64, x64)
 - ✅ **Linux** (arm64, x64)
 
