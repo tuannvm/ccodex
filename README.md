@@ -37,13 +37,27 @@ ccodex --login
 
 ## How It Works
 
-Every time you run `ccodex`, it:
-1. Ensures all dependencies are installed
-2. Starts the proxy if not running
-3. Checks authentication, launches login if needed
-4. Runs Claude Code with the proxy configuration
+Every run of `ccodex` goes through this flow:
 
-This makes it "just work" without manual setup steps.
+```
+ccodex
+  │
+  ├─ 1. Check / install Claude Code CLI (npm)
+  ├─ 2. Check / install CLIProxyAPI (Homebrew / binary)
+  ├─ 3. Configure shell aliases (ccodex, co, claude-openai) — once
+  ├─ 4. Start CLIProxyAPI on 127.0.0.1:8317 (skip if already running)
+  │
+  ├─ 5. Auth check
+  │     ├─ Already configured → skip to step 6
+  │     └─ Not configured →
+  │           ├─ Launch OAuth login (-no-browser)
+  │           ├─ Show URL + "Browser didn't open? (c to copy)"
+  │           ├─ Wait for browser callback
+  │           ├─ Credentials written to ~/.cli-proxy-api/codex-*.json
+  │           └─ Restart proxy to load new credentials
+  │
+  └─ 6. Spawn Claude Code with ANTHROPIC_BASE_URL=http://127.0.0.1:8317
+```
 
 ### OAuth Login UX
 
@@ -55,6 +69,49 @@ Browser didn't open? Use the url below to sign in (c to copy)
 ```
 
 Press **`c`** to copy the URL to your clipboard. After completing login in the browser, the proxy restarts automatically and Claude Code launches.
+
+Supports standard OpenAI accounts and Okta-secured org accounts (e.g. company SSO).
+
+## Logs & Debugging
+
+### Proxy log
+
+CLIProxyAPI writes its output to:
+
+```
+~/.cache/ccodex-cliproxy.log
+```
+
+Tail it while running to see proxy activity:
+
+```bash
+tail -f ~/.cache/ccodex-cliproxy.log
+```
+
+### Debug mode
+
+Set `CCODEX_DEBUG=1` to enable verbose logging from `ccodex` itself:
+
+```bash
+CCODEX_DEBUG=1 ccodex
+```
+
+This prints internal state: auth checks, proxy start/stop, install steps, and path resolution.
+
+### Auth files
+
+Credentials are stored in:
+
+```
+~/.cli-proxy-api/codex-<email>-<org>.json
+```
+
+If auth is broken, delete the file and re-run `ccodex --login`:
+
+```bash
+rm ~/.cli-proxy-api/codex-*.json
+ccodex --login
+```
 
 ## Production Readiness (v0.4.10)
 
