@@ -1498,7 +1498,10 @@ export async function waitForAuth(): Promise<void> {
   for (let i = 0; i < CONFIG.AUTH_WAIT_MAX_RETRIES; i++) {
     await sleep(CONFIG.AUTH_WAIT_RETRY_DELAY_MS);
     const auth = await checkAuthConfigured();
-    if (auth.configured) {
+    // Accept any positive signal: live models, proxy auth entries, or credential files.
+    // hasAuthFiles alone is sufficient here because launchLogin() already exited 0
+    // and the proxy was just restarted fresh — the file is the ground truth.
+    if (auth.configured || auth.hasAuthFiles) {
       console.log("Authentication configured.");
       return;
     }
